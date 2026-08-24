@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-qq-group-manager-mywl",
   "description": "[插件由AI生成]全方面QQ群管：禁言、踢人、入群审核、举报、精华、头衔、黑名单、违禁词、权限组等，适配 OneBot v11",
-  "version": "1.1.10",
+  "version": "1.1.11",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "files": [
