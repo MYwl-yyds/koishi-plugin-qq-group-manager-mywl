@@ -1,25 +1,33 @@
-name: Publish
+name: Publish to npm via OIDC
 
 on:
   push:
-    branches: [master, main]
-  workflow_dispatch:
+    branches: [master]     # 当推送到 master 或 main 分支时触发
+  workflow_dispatch:             # 支持手动触发（在 GitHub Actions 页面点击按钮）
+
+permissions:
+  contents: write                # 允许创建 release 标签等
+  id-token: write                # 关键：允许请求 OIDC 令牌（必须！）
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup Node
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
+
       - name: Install dependencies
-        run: npm install
-      - name: Build
-        run: npm run build
+        run: npm ci               # 使用 npm ci 更可靠（依赖版本锁定）
+
+      - name: Build plugin
+        run: npm run build        # 编译 TypeScript 生成 dist 文件夹
+
       - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+        # --provenance 会利用 OIDC 令牌自动验证身份并生成来源证明
