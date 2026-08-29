@@ -40,33 +40,48 @@ export interface JoinFrequencyConfig {
   enabled: boolean
   windowMinutes: number
   maxCount: number
+  // 命中频率限制时的拒绝理由
+  rejectReason: string
 }
 
 export interface JoinBlacklistConfig {
   enabled: boolean
+  // 命中黑名单时的拒绝理由
+  rejectReason: string
 }
 
 export interface JoinQqLevelConfig {
   enabled: boolean
   minLevel: number
+  // 等级不足时的拒绝理由
+  rejectReason: string
 }
 
 export interface JoinKeywordConfig {
   enabled: boolean
   passKeywords: string[]
   rejectKeywords: string[]
+  // 命中拒绝关键词时的拒绝理由
+  rejectReason: string
 }
 
 export interface JoinManualConfig {
   enabled: boolean
   timeoutMinutes: number
-  reviewers: string[]
-  notifyMode: 'group' | 'private' | 'both'
-  notifyGroupId: string
+  // 审核员拒绝且未填理由时的默认拒绝理由
+  rejectReason: string
 }
 
 export interface JoinLlmConfig {
   enabled: boolean
+  // LLM 拒绝时的理由优先使用此值，为空则用 AI 生成的理由
+  rejectReason: string
+}
+
+// 默认操作：所有审核判定失效或超时后执行（同意或拒绝）
+export interface JoinDefaultConfig {
+  action: 'approve' | 'reject'
+  rejectReason: string
 }
 
 export interface JoinReviewConfig {
@@ -77,6 +92,7 @@ export interface JoinReviewConfig {
   keyword: JoinKeywordConfig
   manual: JoinManualConfig
   llm: JoinLlmConfig
+  default: JoinDefaultConfig
   autoNotice: NoticeConfig
 }
 
@@ -214,7 +230,7 @@ export interface JoinRequestRecord {
   userId: string
   nickname: string
   comment: string
-  status: 'pending' | 'approved' | 'rejected' | 'timeout' | 'llm' | 'manual'
+  status: 'pending' | 'approved' | 'rejected' | 'timeout' | 'llm' | 'manual' | 'default'
   reviewers: string[]
   notified: string[]
   createdAt: Date

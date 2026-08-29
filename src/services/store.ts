@@ -214,6 +214,11 @@ export class Store {
     return this.db.get('gm_group_config', {})
   }
 
+  // 删除某群的全部配置记录（彻底移除，区别于「重置为全局」）
+  async groupConfigRemove(groupId: string): Promise<void> {
+    await this.db.remove('gm_group_config', { groupId })
+  }
+
   // ---------- 全局覆盖配置 ----------
   async globalConfigGet(): Promise<GlobalConfigRecord | undefined> {
     const res = await this.db.get('gm_global_config', {})

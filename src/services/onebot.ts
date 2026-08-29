@@ -12,12 +12,22 @@ function toCamel(name: string): string {
   return name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
 }
 
+// 群资料（用于通知变量：群聊名称/简介/头像/人数）
+export interface GroupProfile {
+  name: string
+  intro: string
+  avatar: string
+  memberCount: string
+}
+
 // 统一封装 OneBot v11 内置接口，所有调用具备异常捕获与降级返回。
 // NapCat / LLBot / go-cqhttp 均为标准 OneBot v11 协议，统一按 snake_case action + 对象参数调用。
 export class OneBotService {
   private ctx: Context
   private log: any
   readonly framework: OneBotFramework
+  // 群资料短时缓存，避免违禁词等高频通知重复调用 get_group_info
+  private groupProfileCache = new Map<string, { at: number, data: GroupProfile }>()
 
   constructor(ctx: Context, framework: OneBotFramework = 'auto') {
     this.ctx = ctx
@@ -316,15 +326,34 @@ export class OneBotService {
     return uid
   }
 
-  // 从群自身设置中提取「入群问题 / 群说明」（不同框架返回字段不同，尽力兼容）
-  async getGroupQuestion(session: Session, groupId: string): Promise<string> {
-    const info = await this.getGroupInfo(session, groupId)
-    const keys = ['group_question', 'join_question', 'question', 'group_memo', 'memo', 'group_slogan', 'slogan', 'introduction', 'description', '群说明', '说明', '加群问题']
-    for (const k of keys) {
+  // 获取群资料（群聊名称/简介/头像/人数），带短时缓存，失败降级返回空值兜底
+  async getGroupProfile(session: Session, groupId: string): Promise<GroupProfile> {
+    const gid = String(groupId || '')
+    if (!gid) return { name: '', intro: '', avatar: '', memberCount: '' }
+    const hit = this.groupProfileCache.get(gid)
+    if (hit && Date.now() - hit.at < 60000) return hit.data
+    const info = await this.getGroupInfo(session, gid)
+    const introKeys = ['group_memo', 'memo', 'introduction', 'description', 'group_slogan', 'slogan', '群简介', '简介', '群说明']
+    let intro = ''
+    for (const k of introKeys) {
       const v = (info as any)[k]
-      if (v !== undefined && v !== null && String(v).trim()) return String(v).trim()
+      if (v !== undefined && v !== null && String(v).trim()) { intro = String(v).trim(); break }
     }
-    return ''
+    const count = (info as any).member_count ?? (info as any).memberCount
+    const name = String((info as any).group_name ?? (info as any).name ?? '').trim() || gid
+    const data: GroupProfile = {
+      name,
+      intro,
+      // QQ 群默认头像链接（p.qlogo.cn gh 系列）
+      avatar: `https://p.qlogo.cn/gh/${gid}/${gid}/640/`,
+      memberCount: count !== undefined && count !== null ? String(count) : '',
+    }
+    this.groupProfileCache.set(gid, { at: Date.now(), data })
+    if (this.groupProfileCache.size > 200) {
+      const first = this.groupProfileCache.keys().next().value
+      if (first) this.groupProfileCache.delete(first)
+    }
+    return data
   }
 
   async sendGroup(session: Session, groupId: string, content: string | any[]): Promise<string> {

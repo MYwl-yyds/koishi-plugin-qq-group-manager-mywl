@@ -72,7 +72,7 @@ async function buildSnapshot(svc: Services): Promise<any> {
     logs: logs.slice(0, 100),
     stats,
     commands: [
-      '禁言', '解除禁言', '全体禁言', '全体解禁', '踢出', '退群', '入群审核',
+      '禁言', '解除禁言', '全体禁言', '全体解禁', '踢出', '退群', '审核员',
       '设置精华', '取消精华', '设置头衔', '取消头衔',
       '添加黑名单', '移除黑名单', '添加白名单', '移除白名单', '添加违禁词', '移除违禁词', '权限组',
     ],
@@ -105,6 +105,10 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
       case 'setGroup':
         await svc.settings.setGroup(data.groupId, data.patch)
         await log.operation('WebUI修改群配置', { groupId: data.groupId })
+        break
+      case 'group.remove':
+        await svc.store.groupConfigRemove(data.groupId)
+        await log.operation('WebUI删除群配置', { groupId: data.groupId })
         break
       case 'clearGroup':
         await svc.settings.clearGroup(data.groupId)

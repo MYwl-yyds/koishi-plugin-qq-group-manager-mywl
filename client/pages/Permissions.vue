@@ -31,7 +31,7 @@
                 <button class="qg-btn sm" @click="savePriority">保存</button>
               </label>
 
-              <h3 style="margin-top:4px">命令权限开关</h3>
+              <h3 style="margin-top:4px">命令 / 权限开关</h3>
               <div class="qg-perm-grid">
                 <label v-for="cmd in data.commands" :key="cmd">
                   <input type="checkbox" :checked="selected.perms?.[cmd] !== false" @change="togglePerm(cmd, $event)" />

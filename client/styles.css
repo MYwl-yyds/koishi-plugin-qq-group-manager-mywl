@@ -257,6 +257,21 @@
 .qg-error { color: #dc2626; margin-left: 8px; font-weight: 700; }
 .qg-sep { border: none; border-top: 1px solid var(--qg-border); margin: 22px 0; }
 
+.qg-fixed-prompt {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, .75);
+  border: 1px dashed var(--qg-border);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--qg-text-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
 .qg-perm-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .qg-perm-grid label { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid #f1f2f6; border-radius: 10px; cursor: pointer; transition: background .15s; }
 .qg-perm-grid label:hover { background: #fafbff; }

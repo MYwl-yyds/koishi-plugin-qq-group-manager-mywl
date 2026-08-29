@@ -1,5 +1,6 @@
 import { Context } from 'koishi'
 import { AiConfig, ReviewVerdict, ReportVerdict } from '../types'
+import { JOIN_PROMPT_FIXED, DEFAULT_REPORT_PROMPT } from '../constants'
 
 // 提取 JSON（兼容 Markdown 代码块包裹）
 export function extractJson<T = any>(text: string): T | null {
@@ -71,27 +72,30 @@ export class AiService {
     }
   }
 
-  // 入群审核：返回结构化结果，失败降级返回默认批准
-  async reviewJoin(config: AiConfig, content: string): Promise<ReviewVerdict> {
+  // 入群审核：返回结构化结果；判定失效（接口异常 / 返回无法解析）时返回 null，
+  // 由上层流程降级到「默认操作」处理
+  async reviewJoin(config: AiConfig, content: string): Promise<ReviewVerdict | null> {
     try {
-      const system = config.prompts?.joinReview || '你是入群申请审核助手。'
+      // 固定提示词 + 用户自定义提示词自动合并（用户未填时仅使用固定内容）
+      const custom = String(config.prompts?.joinReview || '').trim()
+      const system = custom ? `${JOIN_PROMPT_FIXED}\n\n【本群自定义审核要求】\n${custom}` : JOIN_PROMPT_FIXED
       const text = await this.chat(config, system, `入群申请内容：\n${content || '（无申请内容）'}`)
       const parsed = extractJson<{ approve?: boolean, reason?: string }>(text)
       if (parsed && typeof parsed.approve === 'boolean') {
         return { approve: parsed.approve, reason: parsed.reason || '由 AI 判定' }
       }
-      this.log.warn('AI 入群审核返回无法解析，默认批准', text)
-      return { approve: true, reason: 'AI 返回异常，默认批准' }
+      this.log.warn('AI 入群审核返回无法解析，判定失效', text)
+      return null
     } catch (e) {
-      this.log.warn('AI 入群审核失败，降级默认批准', (e as Error).message)
-      return { approve: true, reason: 'AI 服务不可用，默认批准' }
+      this.log.warn('AI 入群审核失败，判定失效', (e as Error).message)
+      return null
     }
   }
 
   // 举报审核：返回结构化结论，失败降级返回不违规
   async reviewReport(config: AiConfig, content: string): Promise<ReportVerdict> {
     try {
-      const system = config.prompts?.reportReview || '你是群消息违规审核助手。'
+      const system = config.prompts?.reportReview || DEFAULT_REPORT_PROMPT
       const text = await this.chat(config, system, `待审核消息：\n${content}`)
       const parsed = extractJson<{ violation?: boolean, type?: string, level?: string, reason?: string, muteDuration?: number }>(text)
       if (parsed && typeof parsed.violation === 'boolean') {

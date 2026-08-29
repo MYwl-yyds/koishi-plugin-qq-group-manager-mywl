@@ -2,7 +2,10 @@ import { Context, Session, segment } from 'koishi'
 import { NoticeConfig } from '../types'
 
 // 当下列变量取值为空时，包含这些变量的整行将被省略
-const OPTIONAL_VARS = ['question', 'answer', 'level']
+const OPTIONAL_VARS = ['answer', 'level', 'groupIntro', 'memberCount']
+
+// 需要自动补全的群信息变量
+const GROUP_VARS = ['groupName', 'groupIntro', 'groupAvatar', 'memberCount']
 
 // 渲染通知模板（支持变量与条件行），返回可直接发送的消息片段数组
 export function renderNotice(template: string, vars: Record<string, string>): any[] {
@@ -10,7 +13,7 @@ export function renderNotice(template: string, vars: Record<string, string>): an
   const lines = String(template ?? '').split('\n')
   const out: any[] = []
   lines.forEach((line, i) => {
-    // 可选变量为空则跳过整行（例如未设置入群问题、无回答、无等级）
+    // 可选变量为空则跳过整行（例如无回答、无等级、无群简介、无群人数）
     if (OPTIONAL_VARS.some((k) => line.includes(`{${k}}`) && !vars[k])) return
     const parts = renderLine(line, vars, avatarUrl)
     for (const p of parts) out.push(p)
@@ -30,6 +33,8 @@ function renderLine(line: string, vars: Record<string, string>, avatarUrl: strin
     const key = m[1]
     if (key === 'avatar') {
       if (avatarUrl) parts.push(segment.image(avatarUrl))
+    } else if (key === 'groupAvatar') {
+      if (vars['groupAvatar']) parts.push(segment.image(vars['groupAvatar']))
     } else {
       const val = vars[key] ?? ''
       if (val) parts.push(val)
@@ -51,16 +56,32 @@ export class NoticeService {
     this.onebot = onebot
   }
 
-  // 发送通知；fallbackGroup 用于 targetId 为空时回退到事件所在群
+  // 发送通知；fallbackGroup 用于 targetId 为空时回退到事件所在群。
+  // 自动按模板引用补全：群信息变量（{groupName}/{groupIntro}/{groupAvatar}/{memberCount}）与 {level}。
   async send(session: Session, notice: NoticeConfig, vars: Record<string, string>, fallbackGroup = ''): Promise<void> {
     try {
       if (!notice || !notice.enabled) return
-      const content = renderNotice(notice.text, vars)
+      const text = String(notice.text ?? '')
+      const groupId = vars['groupId'] || fallbackGroup || ''
+      const enriched: Record<string, string> = { ...vars }
+      if (GROUP_VARS.some((k) => text.includes(`{${k}}`)) && groupId) {
+        const p = await this.onebot.getGroupProfile(session, groupId)
+        enriched['groupName'] = p.name
+        enriched['groupIntro'] = p.intro
+        enriched['groupAvatar'] = p.avatar
+        enriched['memberCount'] = p.memberCount
+      }
+      if (text.includes('{level}') && !enriched['level'] && enriched['userId']) {
+        const stranger = await this.onebot.getStrangerInfo(session, enriched['userId'])
+        enriched['level'] = stranger && typeof stranger.level === 'number' ? String(stranger.level) : ''
+      }
+      const content = renderNotice(text, enriched)
       if (!content || content.length === 0) return
       if (notice.mode === 'private') {
         if (notice.targetId) await this.onebot.sendPrivate(session, notice.targetId, content)
+        else if (groupId) await this.onebot.sendGroup(session, groupId, content)
       } else {
-        const gid = notice.targetId || fallbackGroup
+        const gid = notice.targetId || groupId
         if (gid) await this.onebot.sendGroup(session, gid, content)
       }
     } catch (e) {

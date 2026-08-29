@@ -1,0 +1,16 @@
+import { Context, Session } from 'koishi';
+export declare function idOf(value: string | number | undefined | null): string;
+export declare function sleep(ms: number): Promise<void>;
+export declare function parseDuration(input: string | undefined, defaultMinutes?: number): number;
+export declare function formatDuration(minutes: number): string;
+export declare function normalizeId(id: string | number | undefined | null): string;
+export declare function extractUser(session: Session, raw?: string): string;
+export declare function resolveTargetUser(session: Session, value?: string): string;
+export declare function extractAllUsers(session: Session): string[];
+export declare function mergeDeep<T>(base: T, override: any): T;
+export declare function mergeEffective<T>(base: T, override: any): T;
+export declare function template(text: string, vars: Record<string, string>): string;
+export declare function isPrivateChat(session: Session): boolean;
+export declare function resolveTarget(session: Session): string;
+export declare const PREFIX = "";
+export declare function logger(ctx: Context): import("reggol");

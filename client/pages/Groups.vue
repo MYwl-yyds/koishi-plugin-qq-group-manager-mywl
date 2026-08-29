@@ -24,7 +24,10 @@
           <div v-else>
             <div class="qg-card">
               <div class="qg-heading"><h3>群 {{ selectedId }} 配置</h3>
-                <button class="qg-btn sm danger" @click="reset">重置为全局</button>
+                <div>
+                  <button class="qg-btn sm" @click="reset">重置为全局</button>
+                  <button class="qg-btn sm danger" @click="removeGroup">删除配置</button>
+                </div>
               </div>
               <label class="qg-row" title="关闭后本群不启用任何群管功能"><span>群管功能总开关</span><input type="checkbox" v-model="form.enableGroupManagement" /></label>
             </div>
@@ -65,31 +68,44 @@
             <div class="qg-card">
               <h3>入群审核</h3>
               <label class="qg-row" title="是否启用入群审核流程"><span>总开关</span><input type="checkbox" v-model="form.joinEnabled" /></label>
+              <p class="qg-hint">审核流程固定顺序：频率检查 → 黑名单检查 → 等级检查 → 关键词检查 → 人工审核 → LLM自动审核 → 默认操作。未开启的步骤自动跳过；「默认操作」仅在所有审核判定失效或超时后执行。</p>
               <div class="qg-grid two" style="margin-top:8px">
                 <div>
                   <label class="qg-row" title="按时间窗口内申请次数判断是否过于频繁"><span>频率检查</span><input type="checkbox" v-model="form.freqEnabled" /></label>
                   <label class="qg-row" title="频率统计窗口（分钟）"><span>频率窗口(分)</span><input class="qg-input grow" type="number" v-model="form.freqWindow" /></label>
                   <label class="qg-row" title="窗口内允许的最大申请次数"><span>窗口内最大次数</span><input class="qg-input grow" type="number" v-model="form.freqMax" /></label>
+                  <label class="qg-row" style="align-items:flex-start" title="频率检查拒绝入群时自动提交的理由"><span>频率拒绝理由</span><textarea class="qg-textarea grow" v-model="form.freqRejectReason" rows="2"></textarea></label>
                   <label class="qg-row" title="命中黑名单自动拒绝"><span>黑名单检查</span><input type="checkbox" v-model="form.blEnabled" /></label>
-                  <label class="qg-row" title="按申请人 QQ 等级判断（低于最低等级自动拒绝）"><span>QQ 等级检查</span><input type="checkbox" v-model="form.levelEnabled" /></label>
-                  <label class="qg-row" title="通过审核所需的最低 QQ 等级"><span>最低等级</span><input class="qg-input grow" type="number" v-model="form.minLevel" /></label>
+                  <label class="qg-row" style="align-items:flex-start" title="黑名单检查拒绝入群时自动提交的理由"><span>黑名单拒绝理由</span><textarea class="qg-textarea grow" v-model="form.blRejectReason" rows="2"></textarea></label>
                 </div>
                 <div>
+                  <label class="qg-row" title="按申请人 QQ 等级判断（低于最低等级自动拒绝）"><span>QQ 等级检查</span><input type="checkbox" v-model="form.levelEnabled" /></label>
+                  <label class="qg-row" title="通过审核所需的最低 QQ 等级"><span>最低等级</span><input class="qg-input grow" type="number" v-model="form.minLevel" /></label>
+                  <label class="qg-row" style="align-items:flex-start" title="等级检查拒绝入群时自动提交的理由"><span>等级拒绝理由</span><textarea class="qg-textarea grow" v-model="form.levelRejectReason" rows="2"></textarea></label>
                   <label class="qg-row" title="按通过/拒绝关键词判断申请"><span>关键词检查</span><input type="checkbox" v-model="form.kwEnabled" /></label>
                   <label class="qg-row" style="align-items:flex-start" title="命中即自动通过，逗号/换行分隔"><span>通过关键词</span><textarea class="qg-textarea grow" v-model="form.passKeywords" rows="2" placeholder="逗号分隔"></textarea></label>
                   <label class="qg-row" style="align-items:flex-start" title="命中即自动拒绝，逗号/换行分隔"><span>拒绝关键词</span><textarea class="qg-textarea grow" v-model="form.rejectKeywords" rows="2" placeholder="逗号分隔"></textarea></label>
-                  <label class="qg-row" title="需要人工审核（可通过引用回复通知审批）"><span>人工审核</span><input type="checkbox" v-model="form.manualEnabled" /></label>
-                  <label class="qg-row" title="人工审核超时时间（分钟）"><span>人工超时(分)</span><input class="qg-input grow" type="number" v-model="form.manualTimeout" /></label>
-                  <label class="qg-row" title="人工审核后交由 LLM 自动判断"><span>LLM 自动处理</span><input type="checkbox" v-model="form.llmEnabled" /></label>
+                  <label class="qg-row" style="align-items:flex-start" title="关键词检查拒绝入群时自动提交的理由"><span>关键词拒绝理由</span><textarea class="qg-textarea grow" v-model="form.kwRejectReason" rows="2"></textarea></label>
                 </div>
               </div>
-              <label class="qg-row" style="align-items:flex-start" title="可参与人工审核的审核员 QQ，逗号/换行分隔（超管始终可审核）"><span>审核员 QQ</span><textarea class="qg-textarea grow" v-model="form.reviewers" rows="2" placeholder="逗号分隔"></textarea></label>
-              <label class="qg-row" title="人工审核通知的发送方式"><span>通知方式</span>
-                <select class="qg-select grow" v-model="form.notifyMode">
-                  <option value="group">群聊</option><option value="private">私聊</option><option value="both">两者</option>
-                </select>
-              </label>
-              <label class="qg-row" title="人工审核通知发送到的群号（通知方式为群聊时）"><span>通知群号</span><input class="qg-input grow" v-model="form.notifyGroupId" /></label>
+              <div class="qg-grid two" style="margin-top:8px">
+                <div>
+                  <label class="qg-row" title="需要人工审核（拥有「审核员」权限的用户可引用回复通知审批）"><span>人工审核</span><input type="checkbox" v-model="form.manualEnabled" /></label>
+                  <label class="qg-row" title="人工审核超时时间（分钟），超时后进入 LLM 自动审核或默认操作"><span>人工超时(分)</span><input class="qg-input grow" type="number" v-model="form.manualTimeout" /></label>
+                  <label class="qg-row" style="align-items:flex-start" title="审核员拒绝且未填写理由时使用的默认拒绝理由"><span>人工拒绝理由</span><textarea class="qg-textarea grow" v-model="form.manualRejectReason" rows="2"></textarea></label>
+                </div>
+                <div>
+                  <label class="qg-row" title="人工审核超时后交由 LLM 自动判断"><span>LLM 自动处理</span><input type="checkbox" v-model="form.llmEnabled" /></label>
+                  <label class="qg-row" style="align-items:flex-start" title="LLM 判定拒绝时优先使用此理由，留空则用 AI 生成的理由"><span>LLM 拒绝理由</span><textarea class="qg-textarea grow" v-model="form.llmRejectReason" rows="2"></textarea></label>
+                  <label class="qg-row" title="所有审核判定失效或超时后自动执行的操作"><span>默认操作</span>
+                    <select class="qg-select grow" v-model="form.defaultAction">
+                      <option value="approve">同意</option><option value="reject">拒绝</option>
+                    </select>
+                  </label>
+                  <label class="qg-row" style="align-items:flex-start" title="默认操作为「拒绝」时自动提交的理由"><span>默认拒绝理由</span><textarea class="qg-textarea grow" v-model="form.defaultRejectReason" rows="2"></textarea></label>
+                </div>
+              </div>
+              <p class="qg-hint">「审核员」不再在此配置：请前往「权限管理」为权限组勾选「审核员」权限项统一管理，超级管理员始终可审核。</p>
             </div>
 
             <div class="qg-card">
@@ -126,8 +142,14 @@
                 <label class="qg-row" title="留空则使用全局接口"><span>max_tokens</span><input class="qg-input grow" type="number" v-model="aiForm.maxTokens" placeholder="留空用全局" /></label>
               </div>
               <label class="qg-row" title="留空则使用全局接口"><span>超时(毫秒)</span><input class="qg-input grow" type="number" v-model="aiForm.timeout" placeholder="留空用全局" /></label>
-              <label class="qg-row" style="align-items:flex-start" title="入群审核提示词，留空则使用全局默认提示词"><span>入群审核提示词</span><textarea class="qg-textarea grow" v-model="aiForm.joinPrompt" rows="3" placeholder="留空则使用全局默认提示词"></textarea></label>
-              <label class="qg-row" style="align-items:flex-start" title="举报审核提示词，留空则使用全局默认提示词"><span>举报审核提示词</span><textarea class="qg-textarea grow" v-model="aiForm.reportPrompt" rows="3" placeholder="留空则使用全局默认提示词"></textarea></label>
+              <label class="qg-row" style="align-items:flex-start" title="入群审核提示词的自定义内容，系统自动将其与系统提示词合并"><span>入群审核提示词</span><textarea class="qg-textarea grow" v-model="aiForm.joinPrompt" rows="3" placeholder="填写本群额外的审核要求（可选），将自动附加在系统提示词之后"></textarea></label>
+              <div class="qg-hint" style="margin-top:8px">「系统提示词」内容固定，由系统自动附加，无需填写：
+                <pre class="qg-fixed-prompt">{{
+`你是一个 QQ 群的入群申请审核助手。请根据申请人的入群申请内容与验证答案，判断是否应该批准其入群。
+请严格以 JSON 格式输出，不要包含任何多余文字、代码块或解释，格式如下：
+{"approve": true或false, "reason": "简洁的中文审核理由"}` }}</pre>
+              </div>
+              <label class="qg-row" style="align-items:flex-start" title="举报审核提示词，默认已填入推荐内容，可自行修改；留空则使用默认提示词"><span>举报审核提示词</span><textarea class="qg-textarea grow" v-model="aiForm.reportPrompt" rows="3" placeholder="留空则使用默认提示词"></textarea></label>
             </div>
 
             <div class="qg-card" style="border-color:#fde68a;background:#fffdf5">
@@ -135,14 +157,18 @@
 
               <div class="qg-notice">
                 <h4>入群自动判定结果通知</h4>
-                <p class="qg-hint">发送目标复用入群审核的「通知方式/通知群号/审核员」。可用变量：{userId}=申请人QQ、{nickname}=申请人昵称、{level}=QQ等级、{question}=入群问题、{answer}=申请回答、{result}=判定结果、{reason}=审核理由、{avatar}=头像图片。其中 {question}/{answer}/{level} 为空时整行自动省略。</p>
+                <p class="qg-hint">可用变量：{userId}=申请人QQ、{nickname}=申请人昵称、{level}=QQ等级、{avatar}=头像图片、{groupId}=群号、{groupName}=群聊名称、{groupIntro}=群聊简介、{groupAvatar}=群聊头像、{memberCount}=群人数、{answer}=申请回答内容、{result}=判定结果、{reason}=审核理由。{level}/{answer}/{groupIntro}/{memberCount} 为空时整行自动省略。目标留空时默认发送至事件所在群；人工审核通知也发送到此目标。</p>
                 <label class="qg-row"><span>启用</span><input type="checkbox" v-model="form.autoNotice.enabled" /></label>
+                <div class="qg-grid two" style="margin-top:4px">
+                  <label class="qg-row"><span>发送方式</span><select class="qg-select grow" v-model="form.autoNotice.mode"><option value="group">群聊</option><option value="private">私聊</option></select></label>
+                  <label class="qg-row"><span>目标</span><input class="qg-input grow" v-model="form.autoNotice.targetId" placeholder="留空发送到事件所在群" /></label>
+                </div>
                 <textarea class="qg-textarea" v-model="form.autoNotice.text" rows="6"></textarea>
               </div>
 
               <div class="qg-notice">
                 <h4>违禁词·撤回通知</h4>
-                <p class="qg-hint">可用变量：{userId}=触发用户QQ、{groupId}=群号、{nickname}=触发用户昵称、{word}=触发的违禁词、{punish}=处罚结果。</p>
+                <p class="qg-hint">可用变量：{userId}=触发用户QQ、{nickname}=触发用户昵称、{groupId}=群号、{word}=触发的违禁词、{punish}=处罚结果，以及 {level}=QQ等级、{avatar}=头像图片、{groupName}=群聊名称、{groupIntro}=群聊简介、{groupAvatar}=群聊头像、{memberCount}=群人数。</p>
                 <label class="qg-row"><span>启用</span><input type="checkbox" v-model="form.bwRecallNotice.enabled" /></label>
                 <div class="qg-grid two" style="margin-top:4px">
                   <label class="qg-row"><span>发送方式</span><select class="qg-select grow" v-model="form.bwRecallNotice.mode"><option value="group">群聊</option><option value="private">私聊</option></select></label>
@@ -153,7 +179,7 @@
 
               <div class="qg-notice">
                 <h4>违禁词·禁言通知</h4>
-                <p class="qg-hint">可用变量：{userId}=触发用户QQ、{groupId}=群号、{nickname}=触发用户昵称、{word}=触发的违禁词、{punish}=处罚结果。</p>
+                <p class="qg-hint">可用变量：{userId}=触发用户QQ、{nickname}=触发用户昵称、{groupId}=群号、{word}=触发的违禁词、{punish}=处罚结果，以及 {level}=QQ等级、{avatar}=头像图片、{groupName}=群聊名称、{groupIntro}=群聊简介、{groupAvatar}=群聊头像、{memberCount}=群人数。</p>
                 <label class="qg-row"><span>启用</span><input type="checkbox" v-model="form.bwBanNotice.enabled" /></label>
                 <div class="qg-grid two" style="margin-top:4px">
                   <label class="qg-row"><span>发送方式</span><select class="qg-select grow" v-model="form.bwBanNotice.mode"><option value="group">群聊</option><option value="private">私聊</option></select></label>
@@ -164,7 +190,7 @@
 
               <div class="qg-notice">
                 <h4>违禁词·踢出通知</h4>
-                <p class="qg-hint">可用变量：{userId}=触发用户QQ、{groupId}=群号、{nickname}=触发用户昵称、{word}=触发的违禁词、{punish}=处罚结果。</p>
+                <p class="qg-hint">可用变量：{userId}=触发用户QQ、{nickname}=触发用户昵称、{groupId}=群号、{word}=触发的违禁词、{punish}=处罚结果，以及 {level}=QQ等级、{avatar}=头像图片、{groupName}=群聊名称、{groupIntro}=群聊简介、{groupAvatar}=群聊头像、{memberCount}=群人数。</p>
                 <label class="qg-row"><span>启用</span><input type="checkbox" v-model="form.bwKickNotice.enabled" /></label>
                 <div class="qg-grid two" style="margin-top:4px">
                   <label class="qg-row"><span>发送方式</span><select class="qg-select grow" v-model="form.bwKickNotice.mode"><option value="group">群聊</option><option value="private">私聊</option></select></label>
@@ -175,7 +201,7 @@
 
               <div class="qg-notice">
                 <h4>退群自动拉黑通知</h4>
-                <p class="qg-hint">可用变量：{userId}=退群用户QQ、{groupId}=群号、{nickname}=退群用户昵称、{reason}=拉黑原因。</p>
+                <p class="qg-hint">可用变量：{userId}=退群用户QQ、{nickname}=退群用户昵称、{groupId}=群号、{reason}=拉黑原因，以及 {level}=QQ等级、{avatar}=头像图片、{groupName}=群聊名称、{groupIntro}=群聊简介、{groupAvatar}=群聊头像、{memberCount}=群人数。</p>
                 <label class="qg-row"><span>启用</span><input type="checkbox" v-model="form.abNotice.enabled" /></label>
                 <div class="qg-grid two" style="margin-top:4px">
                   <label class="qg-row"><span>发送方式</span><select class="qg-select grow" v-model="form.abNotice.mode"><option value="group">群聊</option><option value="private">私聊</option></select></label>
@@ -238,18 +264,23 @@ function fillFrom(cfg: any, g: any) {
   form.freqEnabled = c.joinReview?.frequency?.enabled ?? g.joinReview?.frequency?.enabled
   form.freqWindow = c.joinReview?.frequency?.windowMinutes ?? g.joinReview?.frequency?.windowMinutes ?? 10
   form.freqMax = c.joinReview?.frequency?.maxCount ?? g.joinReview?.frequency?.maxCount ?? 3
+  form.freqRejectReason = c.joinReview?.frequency?.rejectReason ?? g.joinReview?.frequency?.rejectReason ?? ''
   form.blEnabled = c.joinReview?.blacklist?.enabled ?? g.joinReview?.blacklist?.enabled
+  form.blRejectReason = c.joinReview?.blacklist?.rejectReason ?? g.joinReview?.blacklist?.rejectReason ?? ''
   form.levelEnabled = c.joinReview?.qqLevel?.enabled ?? g.joinReview?.qqLevel?.enabled
   form.minLevel = c.joinReview?.qqLevel?.minLevel ?? g.joinReview?.qqLevel?.minLevel ?? 8
+  form.levelRejectReason = c.joinReview?.qqLevel?.rejectReason ?? g.joinReview?.qqLevel?.rejectReason ?? ''
   form.kwEnabled = c.joinReview?.keyword?.enabled ?? g.joinReview?.keyword?.enabled
   form.passKeywords = (c.joinReview?.keyword?.passKeywords ?? g.joinReview?.keyword?.passKeywords ?? []).join(',')
   form.rejectKeywords = (c.joinReview?.keyword?.rejectKeywords ?? g.joinReview?.keyword?.rejectKeywords ?? []).join(',')
+  form.kwRejectReason = c.joinReview?.keyword?.rejectReason ?? g.joinReview?.keyword?.rejectReason ?? ''
   form.manualEnabled = c.joinReview?.manual?.enabled ?? g.joinReview?.manual?.enabled
   form.manualTimeout = c.joinReview?.manual?.timeoutMinutes ?? g.joinReview?.manual?.timeoutMinutes ?? 30
-  form.reviewers = (c.joinReview?.manual?.reviewers ?? g.joinReview?.manual?.reviewers ?? []).join(',')
-  form.notifyMode = c.joinReview?.manual?.notifyMode ?? g.joinReview?.manual?.notifyMode ?? 'group'
-  form.notifyGroupId = c.joinReview?.manual?.notifyGroupId ?? g.joinReview?.manual?.notifyGroupId ?? ''
+  form.manualRejectReason = c.joinReview?.manual?.rejectReason ?? g.joinReview?.manual?.rejectReason ?? ''
   form.llmEnabled = c.joinReview?.llm?.enabled ?? g.joinReview?.llm?.enabled
+  form.llmRejectReason = c.joinReview?.llm?.rejectReason ?? g.joinReview?.llm?.rejectReason ?? ''
+  form.defaultAction = c.joinReview?.default?.action ?? g.joinReview?.default?.action ?? 'reject'
+  form.defaultRejectReason = c.joinReview?.default?.rejectReason ?? g.joinReview?.default?.rejectReason ?? ''
   form.bwEnabled = c.bannedWords?.enabled ?? g.bannedWords?.enabled
   form.bwBan = c.bannedWords?.banOnTrigger ?? g.bannedWords?.banOnTrigger
   form.bwKick = c.bannedWords?.kickOnTrigger ?? g.bannedWords?.kickOnTrigger
@@ -281,8 +312,8 @@ function fillFrom(cfg: any, g: any) {
   aiForm.temperature = a?.temperature ?? ''
   aiForm.maxTokens = a?.maxTokens ?? ''
   aiForm.timeout = a?.timeout ?? ''
-  aiForm.joinPrompt = a?.prompts?.joinReview || ''
-  aiForm.reportPrompt = a?.prompts?.reportReview || ''
+  aiForm.joinPrompt = a?.prompts?.joinReview || g.ai?.prompts?.joinReview || ''
+  aiForm.reportPrompt = a?.prompts?.reportReview || g.ai?.prompts?.reportReview || ''
 }
 
 function select(groupId: string) {
@@ -327,13 +358,14 @@ async function save() {
     farewell: { enabled: form.farewellEnabled, text: form.farewellText },
     joinReview: {
       enabled: form.joinEnabled,
-      frequency: { enabled: form.freqEnabled, windowMinutes: Number(form.freqWindow), maxCount: Number(form.freqMax) },
-      blacklist: { enabled: form.blEnabled },
-      qqLevel: { enabled: form.levelEnabled, minLevel: Number(form.minLevel) },
-      keyword: { enabled: form.kwEnabled, passKeywords: split(form.passKeywords), rejectKeywords: split(form.rejectKeywords) },
-      manual: { enabled: form.manualEnabled, timeoutMinutes: Number(form.manualTimeout), reviewers: split(form.reviewers), notifyMode: form.notifyMode, notifyGroupId: form.notifyGroupId },
-      llm: { enabled: form.llmEnabled },
-      autoNotice: { enabled: !!form.autoNotice.enabled, mode: 'group', targetId: '', text: form.autoNotice.text },
+      frequency: { enabled: form.freqEnabled, windowMinutes: Number(form.freqWindow), maxCount: Number(form.freqMax), rejectReason: form.freqRejectReason || '' },
+      blacklist: { enabled: form.blEnabled, rejectReason: form.blRejectReason || '' },
+      qqLevel: { enabled: form.levelEnabled, minLevel: Number(form.minLevel), rejectReason: form.levelRejectReason || '' },
+      keyword: { enabled: form.kwEnabled, passKeywords: split(form.passKeywords), rejectKeywords: split(form.rejectKeywords), rejectReason: form.kwRejectReason || '' },
+      manual: { enabled: form.manualEnabled, timeoutMinutes: Number(form.manualTimeout), rejectReason: form.manualRejectReason || '' },
+      llm: { enabled: form.llmEnabled, rejectReason: form.llmRejectReason || '' },
+      default: { action: form.defaultAction === 'approve' ? 'approve' : 'reject', rejectReason: form.defaultRejectReason || '' },
+      autoNotice: noticePatch(form.autoNotice),
     },
     bannedWords: {
       enabled: form.bwEnabled, banOnTrigger: form.bwBan, kickOnTrigger: form.bwKick, recallOnTrigger: form.bwRecall,
@@ -373,6 +405,19 @@ async function reset() {
   if (!confirm('确定将该群配置重置为全局配置？')) return
   await mutate('clearGroup', { groupId: selectedId.value })
   select(selectedId.value)
+}
+
+async function removeGroup() {
+  if (!selectedId.value) return
+  if (!confirm('确定删除该群的全部配置？删除后该群将直接使用全局配置，且不再出现在「已配置的群」列表中。')) return
+  const gid = selectedId.value
+  const res = await mutate('group.remove', { groupId: gid })
+  if (res?.ok) {
+    toast.success(`已删除群 ${gid} 的配置`)
+    selectedId.value = ''
+  } else {
+    toast.error(res?.error || '删除失败')
+  }
 }
 
 function onBanToggle() {

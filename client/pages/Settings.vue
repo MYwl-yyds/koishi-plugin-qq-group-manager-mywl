@@ -54,6 +54,7 @@
           </div>
           <label class="qg-row"><span>超时(毫秒)</span><input class="qg-input grow" type="number" v-model="aiForm.timeout" /></label>
           <div class="qg-actions"><button class="qg-btn primary" @click="saveAi">保存 AI 设置</button></div>
+          <p class="qg-hint">AI 接口设置通过上方「保存 AI 设置」按钮单独保存，不受「保存全局设置」按钮影响。</p>
         </div>
       </div>
       <div v-else class="qg-muted">加载中…</div>

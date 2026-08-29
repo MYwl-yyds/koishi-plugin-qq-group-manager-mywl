@@ -1,14 +1,12 @@
 import { Config } from './types'
 
 // ---------- 默认 LLM 审核提示词 ----------
-export const DEFAULT_JOIN_PROMPT = `你是一个 QQ 群的入群申请审核助手。请根据申请人的入群申请内容与验证答案，判断是否应该批准其入群。
+// 入群审核「系统提示词」：内容固定，系统自动附加在用户自定义提示词之前，无需用户填写
+export const JOIN_PROMPT_FIXED = `你是一个 QQ 群的入群申请审核助手。请根据申请人的入群申请内容与验证答案，判断是否应该批准其入群。
 请严格以 JSON 格式输出，不要包含任何多余文字、代码块或解释，格式如下：
-{"approve": true或false, "reason": "简洁的中文审核理由"}
+{"approve": true或false, "reason": "简洁的中文审核理由"}`
 
-判断标准：
-1. 申请内容包含广告、营销、引流、骚扰、辱骂、色情、政治敏感等恶意信息时，应拒绝（approve=false）。
-2. 申请内容明确说明来意、与群主题相关、态度友好时，应批准（approve=true）。
-3. 信息不足、无法判断时，默认批准（approve=true）。`
+export const DEFAULT_JOIN_PROMPT = JOIN_PROMPT_FIXED
 
 export const DEFAULT_REPORT_PROMPT = `你是一个 QQ 群消息的违规审核助手。请判断给定消息是否违规，并给出违规类型、程度与建议禁言时长。
 违规类型只能是：涉黄、涉政、人身攻击、广告、其他
@@ -46,34 +44,41 @@ export const DEFAULT_CONFIG: Config = {
       enabled: true,
       windowMinutes: 10,
       maxCount: 3,
+      rejectReason: '申请过于频繁，已被拒绝',
     },
     blacklist: {
       enabled: true,
+      rejectReason: '您已被列入本群黑名单',
     },
     qqLevel: {
       enabled: false,
       minLevel: 8,
+      rejectReason: 'QQ 等级不足，申请已被拒绝',
     },
     keyword: {
       enabled: true,
       passKeywords: [],
       rejectKeywords: [],
+      rejectReason: '申请内容未通过审核',
     },
     manual: {
       enabled: true,
       timeoutMinutes: 30,
-      reviewers: [],
-      notifyMode: 'group',
-      notifyGroupId: '',
+      rejectReason: '人工审核未通过',
     },
     llm: {
       enabled: false,
+      rejectReason: '',
+    },
+    default: {
+      action: 'reject',
+      rejectReason: '审核超时，本次申请未被批准',
     },
     autoNotice: {
       enabled: false,
       mode: 'group',
       targetId: '',
-      text: '[入群申请]{nickname}申请加入本群\n{avatar}\nQQ：{userId}\n等级：{level}\n群聊问题：{question}\n回答：{answer}\n判定结果：{result}',
+      text: '[入群申请]{nickname}申请加入本群\n{avatar}\nQQ：{userId}\n等级：{level}\n{answer}\n判定结果：{result}',
     },
   },
   bannedWords: {
@@ -148,7 +153,8 @@ export const DEFAULT_CONFIG: Config = {
     maxTokens: 1024,
     timeout: 30000,
     prompts: {
-      joinReview: DEFAULT_JOIN_PROMPT,
+      // 入群审核提示词仅存「用户自定义」部分，固定内容由系统自动合并
+      joinReview: '',
       reportReview: DEFAULT_REPORT_PROMPT,
     },
   },
