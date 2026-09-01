@@ -24,8 +24,9 @@ export const DEFAULT_CONFIG: Config = {
   enableGroupManagement: true,
   superUsers: [],
   onebotFramework: 'auto',
-  applyGlobalBlacklist: true,
-  applyGlobalWhitelist: true,
+  // 「应用全局黑/白名单」各群默认关闭：群聊未显式配置时使用本群独立名单
+  applyGlobalBlacklist: false,
+  applyGlobalWhitelist: false,
   mute: {
     enabled: true,
     maxDuration: 43200,

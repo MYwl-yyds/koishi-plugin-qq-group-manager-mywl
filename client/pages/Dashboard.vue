@@ -17,18 +17,35 @@
         <div class="qg-grid two">
           <div class="qg-card">
             <h3>操作日志趋势（近 7 天）</h3>
-            <div v-for="(d, i) in data.stats.logTrend" :key="i" class="qg-bar-row">
-              <span class="date">{{ d.date.slice(5) }}</span>
-              <span class="qg-bar op" :style="{ width: barWidth(d.operation, maxCount) }" :title="'操作 ' + d.operation"></span>
-              <span class="qg-bar au" :style="{ width: barWidth(d.audit, maxCount) }" :title="'审核 ' + d.audit"></span>
-              <span class="qg-bar vi" :style="{ width: barWidth(d.violation, maxCount) }" :title="'违规 ' + d.violation"></span>
-              <span class="qg-bar bl" :style="{ width: barWidth(d.blacklist, maxCount) }" :title="'黑名单 ' + d.blacklist"></span>
-            </div>
+            <svg class="qg-trend" :viewBox="`0 0 ${chartW} ${chartH}`" preserveAspectRatio="xMidYMid meet">
+              <line v-for="(g, i) in gridLines" :key="'g' + i" class="qg-trend-grid" :x1="chartPL" :x2="chartW - chartPR" :y1="g.y" :y2="g.y" />
+              <text v-for="(g, i) in gridLines" :key="'gt' + i" class="qg-trend-label" :x="chartPL - 6" :y="g.y + 3" text-anchor="end">{{ g.label }}</text>
+              <path
+                v-for="s in trendSeries"
+                :key="s.key"
+                :d="seriesPath(s.key)"
+                fill="none"
+                :style="{ stroke: s.color }"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <g v-for="(d, i) in trend" :key="'p' + i">
+                <circle
+                  v-for="s in trendSeries"
+                  :key="s.key"
+                  :cx="xAt(i)"
+                  :cy="yAt(d[s.key])"
+                  r="2.6"
+                  :style="{ fill: s.color }"
+                  stroke="#fff"
+                  stroke-width="1"
+                />
+              </g>
+              <text v-for="(d, i) in trend" :key="'x' + i" class="qg-trend-label" :x="xAt(i)" :y="chartH - 8" text-anchor="middle">{{ d.date.slice(5) }}</text>
+            </svg>
             <div class="qg-legend">
-              <span><i class="qg-dot op"></i>操作</span>
-              <span><i class="qg-dot au"></i>审核</span>
-              <span><i class="qg-dot vi"></i>违规</span>
-              <span><i class="qg-dot bl"></i>黑名单</span>
+              <span v-for="s in trendSeries" :key="s.key"><i class="qg-dot" :style="{ background: s.color }"></i>{{ s.label }}</span>
             </div>
           </div>
 
@@ -124,10 +141,64 @@ async function clearLogs() {
   else toast.error(res?.error || '清除失败')
 }
 
-const maxCount = computed(() => {
-  const d = data.value?.stats?.logTrend || []
-  return Math.max(1, ...d.map((x: any) => Math.max(x.operation, x.audit, x.violation, x.blacklist)))
+// 操作日志趋势曲线图（近 7 天）
+const chartW = 560
+const chartH = 190
+const chartPL = 38
+const chartPR = 14
+const chartPT = 14
+const chartPB = 26
+const trendSeries = [
+  { key: 'operation', label: '操作', color: 'var(--qg-primary)' },
+  { key: 'audit', label: '审核', color: '#f59e0b' },
+  { key: 'violation', label: '违规', color: '#ef4444' },
+  { key: 'blacklist', label: '黑名单', color: '#8b5cf6' },
+]
+const trend = computed(() => (data.value?.stats?.logTrend || []) as any[])
+const trendMax = computed(() => {
+  if (!trend.value.length) return 1
+  return Math.max(1, ...trend.value.map((x: any) => Math.max(x.operation, x.audit, x.violation, x.blacklist)))
 })
+const innerW = computed(() => chartW - chartPL - chartPR)
+const innerH = computed(() => chartH - chartPT - chartPB)
+function xAt(i: number) {
+  const n = trend.value.length
+  if (n <= 1) return chartPL + innerW.value / 2
+  return chartPL + (innerW.value * i) / (n - 1)
+}
+function yAt(v: number) {
+  return chartPT + innerH.value - (v / trendMax.value) * innerH.value
+}
+const gridLines = computed(() => {
+  const lines: { y: number, label: string }[] = []
+  for (let i = 0; i <= 3; i++) {
+    const t = i / 3
+    lines.push({ y: chartPT + Math.round(innerH.value * t), label: String(Math.round(trendMax.value * (1 - t))) })
+  }
+  return lines
+})
+// Catmull-Rom 平滑曲线 -> 三次贝塞尔路径
+function smoothPath(pts: { x: number, y: number }[]): string {
+  if (!pts.length) return ''
+  if (pts.length === 1) return `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
+  let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)]
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const p3 = pts[Math.min(pts.length - 1, i + 2)]
+    const c1x = p1.x + (p2.x - p0.x) / 6
+    const c1y = p1.y + (p2.y - p0.y) / 6
+    const c2x = p2.x - (p3.x - p1.x) / 6
+    const c2y = p2.y - (p3.y - p1.y) / 6
+    d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+  }
+  return d
+}
+function seriesPath(key: string): string {
+  return smoothPath(trend.value.map((x: any, i: number) => ({ x: xAt(i), y: yAt(x[key]) })))
+}
+
 const violationEntries = computed(() => {
   const d = data.value?.stats?.violationDist || {}
   return Object.entries(d).sort((a: any, b: any) => b[1] - a[1])

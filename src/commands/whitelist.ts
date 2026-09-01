@@ -22,15 +22,18 @@ export function apply(ctx: Context, svc: Services) {
       return `已将 ${target} 加入${groupId ? '本群' : '全局'}白名单`
     })
 
-  ctx.command('移除白名单 <user:string>', '将指定用户移出白名单')
-    .action(async ({ session }: any, user) => {
+  ctx.command('移除白名单 <user:string>', '将指定用户移出白名单（加 -q 移出全局白名单）')
+    .option('global', '-q 移出全局白名单')
+    .action(async ({ session, options }: any, user) => {
       if (!await svc.permission.check(session, '移除白名单')) return '你没有权限使用此命令'
       const target = resolveTargetUser(session, user)
       if (!target) return '请提供要移出白名单的用户 QQ'
-      const removed = await svc.store.whitelistRemove(target)
-      if (!removed) return `${target} 不在白名单中`
-      await svc.log.operation('移除白名单', { operatorId: idOf(session.userId), operatorName: session.username || '', targetId: target, groupId: guild(session) })
-      return `已将 ${target} 移出白名单`
+      // 默认移除本群白名单；加 -q 则移除全局白名单
+      const groupId = options?.global ? '' : guild(session)
+      const removed = await svc.store.whitelistRemove(target, groupId)
+      if (!removed) return `${target} 不在${groupId ? '本群' : '全局'}白名单中`
+      await svc.log.operation('移除白名单', { operatorId: idOf(session.userId), operatorName: session.username || '', targetId: target, groupId })
+      return `已将 ${target} 移出${groupId ? '本群' : '全局'}白名单`
     })
 
   ctx.command('白名单列表', '查看白名单')

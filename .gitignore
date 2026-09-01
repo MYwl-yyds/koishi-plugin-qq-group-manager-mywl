@@ -1,0 +1,28 @@
+# 依赖
+node_modules/
+
+# 构建产物（发布到 npm 时会通过 files 字段打包，但不需要提交到 Git）
+dist/
+lib/
+out/
+
+# 本地环境变量（可能含密钥）
+.env
+.env.local
+*.local
+
+# 日志
+*.log
+
+# 编辑器配置
+.vscode/
+.idea/
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# Koishi 本地运行时文件
+koishi.db
+koishi.yml
+cache/

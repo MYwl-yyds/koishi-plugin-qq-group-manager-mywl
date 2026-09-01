@@ -6,7 +6,7 @@
       <div class="qg-side">
         <h3>白名单范围</h3>
         <div class="qg-item" :class="{ active: currentScope === '' }" @click="currentScope = ''">全局白名单</div>
-        <div class="qg-muted" style="margin:6px 0">分群白名单（可关闭「应用全局白名单」以启用本群独立白名单）</div>
+        <div class="qg-muted" style="margin:6px 0">分群白名单（各群默认使用本群独立白名单，可勾选「应用全局白名单」改用全局白名单）</div>
         <div v-for="g in data.groups" :key="g.id" class="qg-group-row">
           <div class="qg-item" :class="{ active: currentScope === g.groupId }" @click="currentScope = g.groupId">群 {{ g.groupId }}</div>
           <label class="qg-apply" title="开启后本群直接使用全局白名单，隐藏本群独立白名单">

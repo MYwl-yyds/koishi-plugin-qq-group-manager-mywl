@@ -227,6 +227,10 @@
 .qg-dot.vi { background: #ef4444; }
 .qg-dot.bl { background: #8b5cf6; }
 
+.qg-trend { display: block; width: 100%; height: auto; margin-top: 8px; }
+.qg-trend-grid { stroke: var(--qg-border); stroke-width: 1; }
+.qg-trend-label { fill: var(--qg-muted); font-size: 10px; }
+
 .qg-dist-row { display: flex; align-items: center; gap: 10px; margin: 9px 0; }
 .qg-dist-row .name { width: 72px; font-size: 13px; color: var(--qg-text-2); }
 .qg-dist-row .cnt { width: 30px; text-align: right; font-size: 13px; font-weight: 700; color: var(--qg-text-2); }
