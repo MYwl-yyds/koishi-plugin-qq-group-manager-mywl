@@ -3,17 +3,93 @@ import { Store } from './store'
 import { PermissionGroup } from '../types'
 import { idOf } from '../utils'
 
-// 所有可被权限组控制的命令名与权限项（与 commands 中的 key 对应；「审核员」为权限项而非命令）
-export const ALL_COMMANDS = [
-  '禁言', '解除禁言', '全体禁言', '全体解禁', '踢出', '退群', '审核员',
-  '设置精华', '取消精华', '设置头衔', '取消头衔',
-  '添加黑名单', '移除黑名单', '添加白名单', '移除白名单', '添加违禁词', '移除违禁词', '权限组',
+// 权限项定义：每个命令 / 管理动作一个独立权限项。
+// group 用于 WebUI 分组展示，danger 标记高危项（默认拒绝）。
+export interface PermItem {
+  key: string
+  label: string
+  group: string
+  danger?: boolean
+}
+
+export const PERM_ITEMS: PermItem[] = [
+  // ---- 成员管理 ----
+  { key: '禁言', label: '禁言', group: '成员管理' },
+  { key: '解除禁言', label: '解除禁言', group: '成员管理' },
+  { key: '全体禁言', label: '全体禁言', group: '成员管理' },
+  { key: '全体解禁', label: '全体解禁', group: '成员管理' },
+  { key: '踢出', label: '踢出', group: '成员管理' },
+  { key: '退群', label: '退群（机器人退出本群）', group: '成员管理', danger: true },
+
+  // ---- 入群审核 ----
+  { key: '审核员', label: '审核员（同意/拒绝入群申请）', group: '入群审核', danger: true },
+
+  // ---- 举报 ----
+  { key: '举报', label: '举报（触发 AI 判定与处罚）', group: '举报', danger: true },
+
+  // ---- 内容管理 ----
+  { key: '设置精华', label: '设置精华', group: '内容管理' },
+  { key: '取消精华', label: '取消精华', group: '内容管理' },
+  { key: '设置头衔', label: '设置头衔', group: '内容管理' },
+  { key: '取消头衔', label: '取消头衔', group: '内容管理' },
+  { key: '违禁词查看', label: '查看违禁词 / 违规图列表', group: '内容管理' },
+  { key: '违禁词管理', label: '增删违禁词', group: '内容管理' },
+  { key: '违规图管理', label: '增删违规图片样本', group: '内容管理' },
+
+  // ---- 名单管理 ----
+  { key: '黑名单查看', label: '查看黑名单', group: '名单管理' },
+  { key: '黑名单管理', label: '增删黑名单', group: '名单管理' },
+  { key: '白名单查看', label: '查看白名单', group: '名单管理' },
+  { key: '白名单管理', label: '增删白名单', group: '名单管理' },
+
+  // ---- 系统 ----
+  { key: '权限组查看', label: '查看权限组', group: '系统', danger: true },
+  { key: '权限组管理', label: '创建/删除权限组、改成员与权限', group: '系统', danger: true },
 ]
+
+// 所有可被权限组控制的权限项 key
+export const ALL_COMMANDS: string[] = PERM_ITEMS.map((i) => i.key)
+
+// 默认放行的权限项（新建权限组时预设为开）。
+// 安全优先：不在此列表中的项一律默认拒绝，必须显式勾选。
+export const DEFAULT_ALLOWED: string[] = [
+  '禁言', '解除禁言', '全体禁言', '全体解禁', '踢出',
+  '设置精华', '取消精华', '设置头衔', '取消头衔',
+  '违禁词查看', '违禁词管理', '违规图管理',
+  '黑名单查看', '黑名单管理', '白名单查看', '白名单管理',
+]
+
+// 默认拒绝的高危项：新建权限组时也不会自动获得，必须在 WebUI 中显式勾选
+export const DEFAULT_DENIED: string[] = PERM_ITEMS.filter((i) => i.danger).map((i) => i.key)
 
 export function defaultPerms(): Record<string, boolean> {
   const map: Record<string, boolean> = {}
-  for (const cmd of ALL_COMMANDS) map[cmd] = true
+  for (const cmd of ALL_COMMANDS) map[cmd] = DEFAULT_ALLOWED.includes(cmd)
   return map
+}
+
+// 旧权限项 → 新权限项的兼容映射。
+// 升级后老权限组里存的还是旧 key，读取时按此映射回退，
+// 避免「升级后所有人突然失去权限」。
+const LEGACY_PERM_MAP: Record<string, string[]> = {
+  添加违禁词: ['违禁词管理'],
+  移除违禁词: ['违禁词管理', '违禁词查看', '违规图管理'],
+  添加黑名单: ['黑名单管理'],
+  移除黑名单: ['黑名单管理', '黑名单查看'],
+  添加白名单: ['白名单管理'],
+  移除白名单: ['白名单管理', '白名单查看'],
+  权限组: ['权限组管理', '权限组查看'],
+}
+
+// 读取某权限项在权限组中的取值，兼容旧 key
+export function permValue(perms: Record<string, boolean> | undefined, key: string): boolean | undefined {
+  if (!perms) return undefined
+  if (typeof perms[key] === 'boolean') return perms[key]
+  // 回退：任一旧 key 显式为 true 即视为开启
+  for (const [legacy, targets] of Object.entries(LEGACY_PERM_MAP)) {
+    if (targets.includes(key) && perms[legacy] === true) return true
+  }
+  return undefined
 }
 
 // 权限服务：自定义权限组 + 优先级 + 默认组 + 命令权限开关
@@ -59,6 +135,17 @@ export class PermissionService {
     const group = await this.getGroup(name)
     if (!group) throw new Error(`权限组「${name}」不存在`)
     await this.store.permissionGroupRemove(group.id)
+  }
+
+  // 重命名权限组，并同步迁移该组在各群配置中的引用（审核员等权限项按名称引用）
+  async renameGroup(name: string, nextName: string): Promise<void> {
+    const target = String(nextName || '').trim()
+    if (!target) throw new Error('新名称不能为空')
+    if (target === name) return
+    const group = await this.getGroup(name)
+    if (!group) throw new Error(`权限组「${name}」不存在`)
+    if (await this.getGroup(target)) throw new Error(`权限组「${target}」已存在`)
+    await this.store.permissionGroupUpdate(group.id, { name: target })
   }
 
   private async clearDefaultExcept(id: number): Promise<void> {
@@ -178,6 +265,25 @@ export class PermissionService {
       return false
     }
 
-    return target.perms[command] !== false
+    // 未显式配置的权限项按「默认拒绝」处理，避免新增权限项或旧数据缺字段时被静默放行
+    // （此前为 !== false，任何缺字段都视为放行，属于 fail-open 权限提升漏洞）
+    // permValue 同时兼容旧权限项 key，避免升级后老权限组失效
+    return permValue(target.perms, command) === true
+  }
+
+  // 审核员判定：需要超级管理员，或所属权限组显式开启了「审核员」权限项
+  async isReviewer(session: Session): Promise<boolean> {
+    if (await this.isSuperAdmin(session)) return true
+    const userId = idOf(session.userId)
+    const groups = await this.store.permissionGroups()
+    if (groups.length === 0) return false
+    const guildId = idOf(session.guildId)
+    const matched = groups.filter((g) =>
+      (g.groupIds.length === 0 || g.groupIds.includes(guildId)) && g.members.includes(userId))
+    // 命中多个组时取优先级最高者，与 check() 一致
+    const target = matched.length > 0
+      ? matched.sort((a, b) => b.priority - a.priority)[0]
+      : groups.find((g) => g.isDefault)
+    return permValue(target?.perms, '审核员') === true
   }
 }

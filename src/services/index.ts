@@ -7,10 +7,14 @@ import { AiService } from './ai'
 import { SettingsService } from './settings'
 import { PermissionService } from './permission'
 import { NoticeService } from './notice'
+import { MemberCheckService } from './member-check'
+import { ImageGuardService } from './image-guard'
+import { ExportService } from './export'
 
 export function createServices(ctx: Context, config: Config): Services {
   const store = new Store(ctx)
   const onebot = new OneBotService(ctx, config.onebotFramework ?? 'auto')
+  const settings = new SettingsService(ctx, store, config)
   const services: Services = {
     ctx,
     config,
@@ -19,9 +23,15 @@ export function createServices(ctx: Context, config: Config): Services {
     ai: new AiService(ctx),
     onebot,
     notice: new NoticeService(ctx, onebot),
-    settings: new SettingsService(ctx, store, config),
+    settings,
     permission: null as any,
+    memberCheck: null as any,
+    imageGuard: null as any,
+    exporter: null as any,
   }
   services.permission = new PermissionService(ctx, store, async () => (await services.settings.getGlobal()).superUsers)
+  services.memberCheck = new MemberCheckService(ctx, services)
+  services.imageGuard = new ImageGuardService(ctx, store)
+  services.exporter = new ExportService(ctx, store, settings, () => services.imageGuard?.invalidate?.())
   return services
 }

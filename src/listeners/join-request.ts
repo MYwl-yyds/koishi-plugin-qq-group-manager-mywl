@@ -1,6 +1,6 @@
 import { Context, Session } from 'koishi'
 import { Services, JoinRequestRecord, Config } from '../types'
-import { idOf } from '../utils'
+import { idOf, TimerRegistry } from '../utils'
 import { trackRequest, lookupRequest, quotedMessageId } from '../services/request-tracker'
 
 function requestFlag(session: Session): string {
@@ -36,22 +36,22 @@ async function notifyReviewers(svc: Services, session: Session, cfg: Config, rec
   if (mode === 'private') {
     if (targetId) {
       const mid = await svc.onebot.sendPrivate(session, targetId, text)
-      if (mid) trackRequest(mid, { flag: record.flag, type: 'join', source: 'manual' })
+      if (mid) trackRequest(String(mid), { flag: record.flag, type: 'join', source: 'manual', groupId: targetId })
     } else {
       // 目标为空：默认发送至事件所在群
       const mid = await svc.onebot.sendGroup(session, record.groupId, text)
-      if (mid) trackRequest(mid, { flag: record.flag, type: 'join', source: 'manual' })
+      if (mid) trackRequest(String(mid), { flag: record.flag, type: 'join', source: 'manual', groupId: record.groupId })
     }
   } else {
     const gid = targetId || record.groupId
     if (gid) {
       const mid = await svc.onebot.sendGroup(session, gid, text)
-      if (mid) trackRequest(mid, { flag: record.flag, type: 'join', source: 'manual' })
+      if (mid) trackRequest(String(mid), { flag: record.flag, type: 'join', source: 'manual', groupId: gid })
     }
   }
 }
 
-async function handleJoinRequest(svc: Services, session: Session): Promise<void> {
+async function handleJoinRequest(svc: Services, session: Session, timers: TimerRegistry): Promise<void> {
   const flag = requestFlag(session)
   if (!flag) {
     return
@@ -114,7 +114,7 @@ async function handleJoinRequest(svc: Services, session: Session): Promise<void>
   }
 
   // 白名单豁免入群审核（优先于全部流程步骤）
-  const wlJoin = await svc.store.whitelistEntry(userId, groupId, cfg.applyGlobalWhitelist !== false)
+  const wlJoin = await svc.store.whitelistEntry(userId, groupId, cfg.applyGlobalWhitelist === true)
   if (wlJoin?.exemptJoin) {
     await finalize(true, '白名单豁免', 'approved')
     return
@@ -156,7 +156,7 @@ async function handleJoinRequest(svc: Services, session: Session): Promise<void>
 
   // 2. 黑名单检查（全局 + 本群，依据「应用全局黑名单」开关）
   if (jr.blacklist.enabled) {
-    if (await svc.store.blacklistHas(userId, groupId, cfg.applyGlobalBlacklist !== false)) {
+    if (await svc.store.blacklistHas(userId, groupId, cfg.applyGlobalBlacklist === true)) {
       await finalize(false, jr.blacklist.rejectReason || '命中黑名单', 'rejected')
       return
     }
@@ -189,7 +189,7 @@ async function handleJoinRequest(svc: Services, session: Session): Promise<void>
   if (jr.manual.enabled) {
     await notifyReviewers(svc, session, cfg, { flag, subType, groupId, userId, nickname, comment, status: 'pending', reviewers: [], notified: [], createdAt: now, expireAt: new Date() } as any)
     const timeoutMs = Math.max(jr.manual.timeoutMinutes, 1) * 60000
-    setTimeout(() => {
+    timers.setTimeout(() => {
       runLlmOrDefault().catch((e) => svc.ctx.logger('join').warn('入群审核超时处理异常', e))
     }, timeoutMs)
     return
@@ -200,8 +200,12 @@ async function handleJoinRequest(svc: Services, session: Session): Promise<void>
 }
 
 export function apply(ctx: Context, svc: Services) {
+  // 人工审核超时定时器随插件卸载一起清理
+  const timers = new TimerRegistry()
+  ctx.on('dispose', () => timers.dispose())
+
   ctx.on('guild-member-request', (session) => {
-    handleJoinRequest(svc, session).catch((e) => {
+    handleJoinRequest(svc, session, timers).catch((e) => {
       ctx.logger('join').warn('入群审核流程异常', e)
     })
   })
@@ -211,7 +215,7 @@ export function apply(ctx: Context, svc: Services) {
     try {
       const qid = quotedMessageId(session)
       if (!qid) return next()
-      const meta = lookupRequest(qid)
+      const meta = lookupRequest(qid, idOf(session.guildId))
       if (!meta || meta.source !== 'manual') return next()
       const intent = parseReplyIntent(String(session.content ?? '').trim())
       if (!intent) return next()
@@ -220,8 +224,8 @@ export function apply(ctx: Context, svc: Services) {
       if (!record || record.status !== 'pending') return next()
 
       const cfg = await svc.settings.getGroup(record.groupId)
-      // 「审核员」作为权限项统一管理，超级管理员始终拥有审核权限
-      if (!await svc.permission.check(session, '审核员')) return next()
+      // 「审核员」作为权限项统一管理：需超级管理员，或所属权限组显式开启该权限项
+      if (!await svc.permission.isReviewer(session)) return next()
 
       const approve = intent === 'approve'
       // 理由可选：未填写时拒绝使用「人工审核」配置的默认拒绝理由

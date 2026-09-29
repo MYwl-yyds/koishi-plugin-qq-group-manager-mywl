@@ -39,7 +39,7 @@ export function apply(ctx: Context, svc: Services) {
       } else {
         mid = await svc.onebot.sendGroup(session, fw.targetId, text)
       }
-      if (mid) trackRequest(mid, { flag, type, source: 'forward' })
+      if (mid) trackRequest(mid, { flag, type, source: 'forward', groupId: fw.mode === 'private' ? '' : fw.targetId })
       ctx.logger('forward').info(`已转发${title}通知 -> ${fw.mode === 'private' ? '私聊' : '群聊'} ${fw.targetId}`)
     } catch (e) {
       ctx.logger('forward').warn('通知转发失败', e)
@@ -73,7 +73,8 @@ export function apply(ctx: Context, svc: Services) {
     try {
       const qid = quotedMessageId(session)
       if (!qid) return next()
-      const meta = lookupRequest(qid)
+      // 群聊中要求通知确实发往本群；私聊不校验群号
+      const meta = lookupRequest(qid, idOf(session.guildId) || undefined)
       if (!meta || meta.source !== 'forward') return next()
       const intent = parseIntent(String(session.content ?? '').trim())
       if (!intent) return next()

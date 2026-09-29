@@ -5,6 +5,7 @@ import { DEFAULT_CONFIG } from './constants'
 import { mergeDeep, logger } from './utils'
 import { initModels } from './services/store'
 import { createServices } from './services'
+import { clearTrackedRequests } from './services/request-tracker'
 import { registerCommands } from './commands'
 import { registerListeners } from './listeners'
 import { applyWebUI } from './webui'
@@ -30,6 +31,14 @@ export function apply(ctx: Context, config: PluginConfig) {
     registerCommands(ctx, svc)
     registerListeners(ctx, svc)
   }
+
+  // 群员检查定时扫描（每类规则独立触发操作：禁言 / 踢出 / 仅记录）
+  svc.memberCheck.start()
+  ctx.on('dispose', () => {
+    svc.memberCheck.stop()
+    // 清理申请通知的内存映射，避免热重载后残留旧 flag 造成误审批
+    clearTrackedRequests()
+  })
 
   // WebUI（用于配置与看板），仅在安装了 console 插件时启用
   ctx.using(['console'], (cctx) => {

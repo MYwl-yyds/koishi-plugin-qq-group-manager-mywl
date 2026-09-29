@@ -1,9 +1,13 @@
 import { Context, Session } from 'koishi'
 import { Services } from '../types'
-import { idOf } from '../utils'
+import { idOf, TimerRegistry } from '../utils'
 
 // 退群自动拉黑：监听群成员减少（主动退群或被踢出）
 export function apply(ctx: Context, svc: Services) {
+  // 延迟拉黑用的定时器需在插件卸载时清理，避免热重载后访问已销毁的 ctx
+  const timers = new TimerRegistry()
+  ctx.on('dispose', () => timers.dispose())
+
   ctx.on('guild-member-removed', async (session: Session) => {
     try {
       const groupId = idOf(session.guildId)
@@ -21,7 +25,7 @@ export function apply(ctx: Context, svc: Services) {
       if (!selfLeave && !cfg.autoBlacklist.onKicked) return
 
       const reason = selfLeave ? '主动退群' : '被踢出'
-      const blGroupId = cfg.applyGlobalBlacklist !== false ? '' : groupId
+      const blGroupId = cfg.applyGlobalBlacklist === true ? '' : groupId
       const doBlacklist = async () => {
         await svc.store.blacklistAdd(userId, 'auto', blGroupId)
         await svc.log.blacklist('退群自动拉黑', { targetId: userId, groupId, detail: reason })
@@ -37,7 +41,7 @@ export function apply(ctx: Context, svc: Services) {
       }
 
       if (cfg.autoBlacklist.delayMinutes > 0) {
-        setTimeout(() => { doBlacklist().catch(() => {}) }, cfg.autoBlacklist.delayMinutes * 60000)
+        timers.setTimeout(() => { doBlacklist().catch(() => {}) }, cfg.autoBlacklist.delayMinutes * 60000)
       } else {
         await doBlacklist()
       }

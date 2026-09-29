@@ -11,6 +11,8 @@ export function apply(ctx: Context, svc: Services) {
   ctx.command('举报', '举报一条被引用的消息（需先引用/回复目标消息）')
     .alias('投诉')
     .action(async ({ session }: any) => {
+      // 举报会触发 AI 判定并执行撤回/禁言/踢出，必须校验权限（默认拒绝）
+      if (!await svc.permission.check(session, '举报')) return '你没有权限使用此命令'
       const cfg = await svc.settings.getGroup(guild(session))
       if (cfg.enableGroupManagement === false) return '本群未启用群管功能'
       if (!cfg.report.enabled) return '举报功能已被禁用'
@@ -46,7 +48,7 @@ export function apply(ctx: Context, svc: Services) {
       if (!target) return '无法获取被举报消息的发送者 QQ，请重新「引用」该消息后重试'
 
       // 白名单豁免被举报
-      const wlReport = await svc.store.whitelistEntry(target, guild(session), cfg.applyGlobalWhitelist !== false)
+      const wlReport = await svc.store.whitelistEntry(target, guild(session), cfg.applyGlobalWhitelist === true)
       if (wlReport?.exemptReport) return '该用户已被豁免举报，无法对其发起举报'
 
       // 组装上下文（被引用消息 + 举报人附言）

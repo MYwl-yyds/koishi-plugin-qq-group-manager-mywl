@@ -96,6 +96,21 @@ export interface JoinReviewConfig {
   autoNotice: NoticeConfig
 }
 
+// 违禁词内的「禁发链接」子项
+export interface LinkGuardConfig {
+  enabled: boolean
+  // 命中链接后的处理（与违禁词一致：禁言 / 踢出 / 撤回）
+  banOnTrigger: boolean
+  kickOnTrigger: boolean
+  recallOnTrigger: boolean
+  banDuration: number
+  // 白名单：支持完整链接、域名、泛域名（*.example.com）
+  whitelist: string[]
+  banNotice: NoticeConfig
+  kickNotice: NoticeConfig
+  recallNotice: NoticeConfig
+}
+
 export interface BannedWordConfig {
   enabled: boolean
   words: string[]
@@ -103,9 +118,103 @@ export interface BannedWordConfig {
   kickOnTrigger: boolean
   recallOnTrigger: boolean
   banDuration: number
+  link: LinkGuardConfig
+  image: ImageGuardConfig
   banNotice: NoticeConfig
   kickNotice: NoticeConfig
   recallNotice: NoticeConfig
+}
+
+// ---------- 禁发指定图片 ----------
+// 样本图（违规图库）条目：保存感知哈希与原始来源，供 pHash 比对
+export interface BannedImageEntry {
+  id: number
+  // 感知哈希（16 位十六进制）
+  hash: string
+  // 归属群号：空串 = 全局样本（对所有群生效），非空 = 该群专属样本
+  groupId: string
+  // 来源：url / upload / command
+  source: string
+  // 原始地址或文件名（便于管理员辨认）
+  origin: string
+  // 备注
+  label: string
+  // 图片尺寸，便于辨认
+  width: number
+  height: number
+  format: string
+  createdAt: Date
+}
+
+// 违禁词内的「禁发指定图片」子项
+export interface ImageGuardConfig {
+  enabled: boolean
+  // 汉明距离阈值：越小越严格（0 只匹配几乎完全相同的图）
+  threshold: number
+  // 触发处理（与违禁词一致：禁言 / 踢出 / 撤回）
+  banOnTrigger: boolean
+  kickOnTrigger: boolean
+  recallOnTrigger: boolean
+  banDuration: number
+  banNotice: NoticeConfig
+  kickNotice: NoticeConfig
+  recallNotice: NoticeConfig
+}
+
+// ---------- 群员检查 ----------
+// 触发操作：禁言 / 踢出 / 仅记录
+export type MemberCheckAction = 'none' | 'mute' | 'kick'
+
+export interface MemberCheckRule {
+  enabled: boolean
+  action: MemberCheckAction
+  // action 为 mute 时生效（分钟）
+  muteDuration: number
+  // 命中后是否撤回该成员最近一条消息（尽力而为，失败不影响主流程）
+  recall: boolean
+  // 是否同时私聊/群内提示（使用 notice）
+  notice: NoticeConfig
+}
+
+// 检测 QQ 账号等级（get_stranger_info.level，1~256）
+export interface MemberCheckQqLevelConfig extends MemberCheckRule {
+  minLevel: number
+  // 无法获取等级时的处理：跳过（安全）或视为命中
+  whenUnknown: 'skip' | 'trigger'
+}
+
+// 检测群名片（包含 / 完全等于）
+export interface MemberCheckCardConfig extends MemberCheckRule {
+  matchMode: 'contains' | 'equals'
+  // 支持正则：以 / 包裹时按正则解析
+  patterns: string[]
+  caseSensitive: boolean
+  // 排除群管理（群主/管理员）与白名单成员
+  excludeAdmins: boolean
+  excludeWhitelist: boolean
+}
+
+// 检测群等级（get_group_member_info.level，即活跃等级）
+export interface MemberCheckGroupLevelConfig extends MemberCheckRule {
+  minLevel: number
+  whenUnknown: 'skip' | 'trigger'
+}
+
+export interface MemberCheckConfig {
+  enabled: boolean
+  // 扫描间隔（分钟）
+  intervalMinutes: number
+  // 单个群的成员检查超时（秒），超时跳过本群
+  timeoutSeconds: number
+  // 每批并发请求数，避免触发协议端风控
+  batchSize: number
+  // 对同一成员的重复处理间隔（小时），避免反复禁言/踢出
+  cooldownHours: number
+  // 只检查最近 N 天内活跃（说过话）的成员，0 表示全部检查
+  activeWithinDays: number
+  qqLevel: MemberCheckQqLevelConfig
+  card: MemberCheckCardConfig
+  groupLevel: MemberCheckGroupLevelConfig
 }
 
 export interface LevelPunishment {
@@ -161,6 +270,7 @@ export interface Config {
   farewell: WelcomeConfig
   joinReview: JoinReviewConfig
   bannedWords: BannedWordConfig
+  memberCheck: MemberCheckConfig
   report: ReportConfig
   autoBlacklist: AutoBlacklistConfig
   requestForward: RequestForwardConfig
@@ -222,6 +332,19 @@ export interface LogEntry {
   createdAt: Date
 }
 
+// 群员检查状态：记录成员的最近活跃时间与最近一次处理时间（用于冷却去重）
+export interface MemberCheckState {
+  id: number
+  groupId: string
+  userId: string
+  // 最近一次发言时间
+  activeAt: Date
+  // 最近一次被群员检查处理的时间
+  checkedAt: Date
+  // 最近一次处理结果（踢出/禁言/无）
+  lastAction: string
+}
+
 export interface JoinRequestRecord {
   id: number
   flag: string
@@ -246,6 +369,8 @@ declare module 'koishi' {
     gm_whitelist: WhitelistEntry
     gm_log: LogEntry
     gm_join_request: JoinRequestRecord
+    gm_member_state: MemberCheckState
+    gm_banned_image: BannedImageEntry
   }
 }
 
@@ -265,6 +390,19 @@ export interface ReportVerdict {
 }
 
 // ---------- OneBot 内部 API（最小化类型） ----------
+export interface OneBotMemberInfo {
+  user_id?: number | string
+  userId?: string
+  nickname?: string
+  card?: string
+  role?: string
+  // 群等级（活跃等级），LLBot / NapCat 的 get_group_member_info 会返回
+  level?: number | string
+  title?: string
+  join_time?: number
+  last_sent_time?: number
+}
+
 export interface OneBotApi {
   setGroupBan(groupId: string, userId: string, duration?: number): Promise<unknown>
   setGroupWholeBan(groupId: string, enable?: boolean): Promise<unknown>
@@ -293,6 +431,9 @@ export interface Services {
   settings: any
   onebot: any
   notice: any
+  memberCheck: any
+  imageGuard: any
+  exporter: any
 }
 
 export function isGroupMessage(target: string | undefined): boolean {

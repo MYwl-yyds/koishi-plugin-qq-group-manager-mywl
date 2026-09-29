@@ -30,11 +30,12 @@ export function apply(ctx: Context, svc: Services) {
 
   root.subcommand('.创建 <name:text>', '创建一个权限组')
     .action(async ({ session }: any, name) => {
-      if (!await svc.permission.check(session, '权限组')) return '你没有权限使用此命令'
+      if (!await svc.permission.check(session, '权限组管理')) return '你没有权限使用此命令'
       if (!name) return '请提供权限组名称'
       try {
         const g = await svc.permission.createGroup(name.trim())
-        return `已创建权限组「${g.name}」（优先级 ${g.priority}，默认开启全部命令权限）`
+        return `已创建权限组「${g.name}」（优先级 ${g.priority}）。默认仅开启常规命令权限，`
+          + `「退群 / 审核员 / 举报 / 权限组」等高危权限需到「权限管理」页面显式勾选。`
       } catch (e) {
         return (e as Error).message
       }
@@ -42,7 +43,7 @@ export function apply(ctx: Context, svc: Services) {
 
   root.subcommand('.删除 <name:text>', '删除一个权限组')
     .action(async ({ session }: any, name) => {
-      if (!await svc.permission.check(session, '权限组')) return '你没有权限使用此命令'
+      if (!await svc.permission.check(session, '权限组管理')) return '你没有权限使用此命令'
       if (!name) return '请提供权限组名称'
       try {
         await svc.permission.removeGroup(name.trim())
@@ -54,7 +55,7 @@ export function apply(ctx: Context, svc: Services) {
 
   root.subcommand('.列表', '查看权限组列表')
     .action(async ({ session }: any) => {
-      if (!await svc.permission.check(session, '权限组')) return '你没有权限使用此命令'
+      if (!await svc.permission.check(session, '权限组查看')) return '你没有权限使用此命令'
       const groups = await svc.permission.listGroups()
       if (groups.length === 0) return '尚未创建任何权限组'
       const lines = groups.map((g) => `「${g.name}」${g.isDefault ? '（默认组）' : ''} 优先级=${g.priority} 成员=${g.members.length} 生效群=${g.groupIds.length === 0 ? '全部' : g.groupIds.length + ' 个'}`)
@@ -63,7 +64,7 @@ export function apply(ctx: Context, svc: Services) {
 
   root.subcommand('.设为默认 <name:text>', '将一个权限组设为默认组')
     .action(async ({ session }: any, name) => {
-      if (!await svc.permission.check(session, '权限组')) return '你没有权限使用此命令'
+      if (!await svc.permission.check(session, '权限组管理')) return '你没有权限使用此命令'
       if (!name) return '请提供权限组名称'
       try {
         await svc.permission.setDefault(name.trim())
@@ -75,7 +76,7 @@ export function apply(ctx: Context, svc: Services) {
 
   root.subcommand('.添加成员 <name:text> <user:string>', '向权限组添加成员')
     .action(async ({ session }: any, name, user) => {
-      if (!await svc.permission.check(session, '权限组')) return '你没有权限使用此命令'
+      if (!await svc.permission.check(session, '权限组管理')) return '你没有权限使用此命令'
       if (!name) return '请提供权限组名称'
       const target = resolveTargetUser(session, user)
       if (!target) return '请 @ 要添加的成员，或提供 QQ 号'
@@ -89,7 +90,7 @@ export function apply(ctx: Context, svc: Services) {
 
   root.subcommand('.移除成员 <name:text> <user:string>', '从权限组移除成员')
     .action(async ({ session }: any, name, user) => {
-      if (!await svc.permission.check(session, '权限组')) return '你没有权限使用此命令'
+      if (!await svc.permission.check(session, '权限组管理')) return '你没有权限使用此命令'
       if (!name) return '请提供权限组名称'
       const target = resolveTargetUser(session, user)
       if (!target) return '请提供要移除的成员 QQ'
@@ -103,7 +104,7 @@ export function apply(ctx: Context, svc: Services) {
 
   root.subcommand('.设置权限 <name:text> <command:text> <enabled:text>', '设置权限组内某命令的开关')
     .action(async ({ session }: any, name, command, enabled) => {
-      if (!await svc.permission.check(session, '权限组')) return '你没有权限使用此命令'
+      if (!await svc.permission.check(session, '权限组管理')) return '你没有权限使用此命令'
       if (!name) return '请提供权限组名称'
       if (!command) return `请提供命令名，可选：${ALL_COMMANDS.join('、')}`
       const on = ['开', 'on', 'true', 'enable', '1'].includes(String(enabled).toLowerCase())
@@ -117,7 +118,7 @@ export function apply(ctx: Context, svc: Services) {
 
   root.subcommand('.添加生效群 <name:text> <groupIds:text>', '给权限组追加生效群聊（多个群号用逗号分隔）')
     .action(async ({ session }: any, name, groupIds) => {
-      if (!await svc.permission.check(session, '权限组')) return '你没有权限使用此命令'
+      if (!await svc.permission.check(session, '权限组管理')) return '你没有权限使用此命令'
       if (!name) return '请提供权限组名称'
       const ids = parseGroupIds(groupIds)
       if (ids.length === 0) return '请提供要添加的群号'
@@ -131,7 +132,7 @@ export function apply(ctx: Context, svc: Services) {
 
   root.subcommand('.清空生效群 <name:text>', '清空权限组的生效群（恢复为所有群）')
     .action(async ({ session }: any, name) => {
-      if (!await svc.permission.check(session, '权限组')) return '你没有权限使用此命令'
+      if (!await svc.permission.check(session, '权限组管理')) return '你没有权限使用此命令'
       if (!name) return '请提供权限组名称'
       try {
         await svc.permission.clearGroups(name.trim())
@@ -143,7 +144,7 @@ export function apply(ctx: Context, svc: Services) {
 
   root.subcommand('.导入 <name:text> [role:text] [groupIds:text]', '按角色从群聊快捷添加成员（角色：管理员/成员/群主；群号留空用当前群）')
     .action(async ({ session }: any, name, role, groupIds) => {
-      if (!await svc.permission.check(session, '权限组')) return '你没有权限使用此命令'
+      if (!await svc.permission.check(session, '权限组管理')) return '你没有权限使用此命令'
       if (!name) return '请提供权限组名称'
       const ro = normalizeRole(role)
       const gid = parseGroupId(groupIds) || guild(session)
