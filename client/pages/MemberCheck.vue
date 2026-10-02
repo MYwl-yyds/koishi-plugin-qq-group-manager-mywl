@@ -34,18 +34,18 @@
         <div class="qg-grid three">
           <div class="qg-card flat">
             <h4>本群总开关</h4>
-            <ToggleRow label="启用群员检查" v-model="cfg.enabled" @update:model-value="save('总开关')" />
+            <ToggleRow label="启用群员检查" v-model="cfg.enabled" @update:model-value="markDirty" />
             <p class="qg-hint tight">关闭后本群不再执行定时扫描。</p>
           </div>
           <div class="qg-card flat">
             <h4>扫描参数（本群）</h4>
-            <ToggleRow label="扫描间隔(分)" type="number" v-model="cfg.intervalMinutes" @update:model-value="save('扫描间隔')" title="本群两次扫描的最小间隔" />
-            <ToggleRow label="单群超时(秒)" type="number" v-model="cfg.timeoutSeconds" @update:model-value="save('单群超时')" title="超过该时长跳过本群，避免卡死" />
-            <ToggleRow label="并发请求数" type="number" v-model="cfg.batchSize" @update:model-value="save('并发数')" title="调用 OneBot 接口的并发数。大群建议 1~2，过高会触发协议端限流，导致等级读取失败" />
-            <ToggleRow label="等级缓存(小时)" type="number" v-model="cfg.levelCacheHours" @update:model-value="save('等级缓存')" title="同一成员在该时间内重复扫描不再请求接口。大群建议 6~24 小时，是避免限流最有效的手段" />
-            <ToggleRow label="失败率上限(%)" type="number" v-model="cfg.maxFailRatio" @update:model-value="save('失败率上限')" title="一次检查中超过该比例的成员取不到有效等级时，判定为协议端限流并立即中止检查（不执行任何处罚），避免整群误判" />
-            <ToggleRow label="冷却时间(小时)" type="number" v-model="cfg.cooldownHours" @update:model-value="save('冷却时间')" title="同一成员在该时间内不重复处理" />
-            <ToggleRow label="仅活跃成员(天)" type="number" v-model="cfg.activeWithinDays" @update:model-value="save('活跃范围')" title="0 表示检查全部成员" />
+            <ToggleRow label="扫描间隔(分)" type="number" v-model="cfg.intervalMinutes" @update:model-value="markDirty" title="本群两次扫描的最小间隔" />
+            <ToggleRow label="单群超时(秒)" type="number" v-model="cfg.timeoutSeconds" @update:model-value="markDirty" title="超过该时长跳过本群，避免卡死" />
+            <ToggleRow label="并发请求数" type="number" v-model="cfg.batchSize" @update:model-value="markDirty" title="调用 OneBot 接口的并发数。大群建议 1~2，过高会触发协议端限流，导致等级读取失败" />
+            <ToggleRow label="等级缓存(小时)" type="number" v-model="cfg.levelCacheHours" @update:model-value="markDirty" title="同一成员在该时间内重复扫描不再请求接口。大群建议 6~24 小时，是避免限流最有效的手段" />
+            <ToggleRow label="失败率上限(%)" type="number" v-model="cfg.maxFailRatio" @update:model-value="markDirty" title="一次检查中超过该比例的成员取不到有效等级时，判定为协议端限流并立即中止检查（不执行任何处罚），避免整群误判" />
+            <ToggleRow label="冷却时间(小时)" type="number" v-model="cfg.cooldownHours" @update:model-value="markDirty" title="同一成员在该时间内不重复处理" />
+            <ToggleRow label="仅活跃成员(天)" type="number" v-model="cfg.activeWithinDays" @update:model-value="markDirty" title="0 表示检查全部成员" />
             <p class="qg-hint tight">
               大群提示：QQ 等级需要逐人调用 <code>get_stranger_info</code>，人数多时容易被协议端限流。
               建议「并发请求数」设为 1~2、「等级缓存」设为 6~24 小时、「仅活跃成员」设为 7~30 天，
@@ -73,63 +73,65 @@
       <div class="qg-grid three">
         <!-- QQ 等级 -->
         <Section title="检测等级" sub="QQ 账号等级" icon="⭐" :open="true">
-          <ToggleRow label="启用此项检测" v-model="qq.enabled" @update:model-value="save('QQ等级检测')" />
-          <ToggleRow label="最低等级" type="number" v-model="qq.minLevel" @update:model-value="save('QQ等级阈值')" title="低于该值时触发操作" />
+          <ToggleRow label="启用此项检测" v-model="qq.enabled" @update:model-value="markDirty" />
+          <ToggleRow label="最低等级" type="number" v-model="qq.minLevel" @update:model-value="markDirty" title="低于该值时触发操作" />
           <ToggleRow
             label="触发操作"
             type="select"
             v-model="qq.action"
             :options="actionOptions"
-            @update:model-value="save('QQ等级触发操作')"
+            @update:model-value="markDirty"
           />
           <ToggleRow
             label="禁言时长(分)"
             type="number"
             v-model="qq.muteDuration"
             :disabled="qq.action !== 'mute'"
-            @update:model-value="save('QQ等级禁言时长')"
+            @update:model-value="markDirty"
           />
           <ToggleRow
             label="取不到等级时"
             type="select"
             v-model="qq.whenUnknown"
             :options="unknownOptions"
-            @update:model-value="save('QQ等级降级策略')"
+            @update:model-value="markDirty"
           />
           <p class="qg-hint tight">
             等级来自 <code>get_stranger_info</code> 的 <code>level</code> 字段（QQ 账号等级 1~256）。
             LLBot / NapCat 均支持；接口不可用时按上方「取不到等级时」处理。
           </p>
           <NoticeEditor title="命中通知" v-model="qq.notice" hint="变量：{userId} {nickname} {groupId} {level} {threshold} {punish}" />
-          <div class="qg-actions"><button class="qg-btn primary sm" @click="save('QQ等级设置')">保存本项</button></div>
+          <div class="qg-actions">
+            <button class="qg-btn primary sm" :disabled="!dirty" @click="save('QQ等级设置')">保存本项</button>
+          </div>
         </Section>
 
         <!-- 群名片 -->
         <Section title="检测群名片" sub="包含 / 完全等于" icon="🏷️" :open="true">
-          <ToggleRow label="启用此项检测" v-model="card.enabled" @update:model-value="save('群名片检测')" />
+          <ToggleRow label="启用此项检测" v-model="card.enabled" @update:model-value="markDirty" />
           <ToggleRow
             label="匹配方式"
             type="select"
             v-model="card.matchMode"
             :options="[{ label: '包含', value: 'contains' }, { label: '完全等于', value: 'equals' }]"
-            @update:model-value="save('群名片匹配方式')"
+            @update:model-value="markDirty"
           />
-          <ToggleRow label="区分大小写" v-model="card.caseSensitive" @update:model-value="save('群名片大小写')" />
-          <ToggleRow label="排除群管理" v-model="card.excludeAdmins" @update:model-value="save('群名片排除群管理')" title="群主与管理员不参与检查" />
-          <ToggleRow label="排除白名单" v-model="card.excludeWhitelist" @update:model-value="save('群名片排除白名单')" />
+          <ToggleRow label="区分大小写" v-model="card.caseSensitive" @update:model-value="markDirty" />
+          <ToggleRow label="排除群管理" v-model="card.excludeAdmins" @update:model-value="markDirty" title="群主与管理员不参与检查" />
+          <ToggleRow label="排除白名单" v-model="card.excludeWhitelist" @update:model-value="markDirty" />
           <ToggleRow
             label="触发操作"
             type="select"
             v-model="card.action"
             :options="actionOptions"
-            @update:model-value="save('群名片触发操作')"
+            @update:model-value="markDirty"
           />
           <ToggleRow
             label="禁言时长(分)"
             type="number"
             v-model="card.muteDuration"
             :disabled="card.action !== 'mute'"
-            @update:model-value="save('群名片禁言时长')"
+            @update:model-value="markDirty"
           />
           <label class="qg-field" style="margin-top:8px">
             <label>匹配内容（逗号分隔，支持 /正则/ 写法）</label>
@@ -138,7 +140,7 @@
               rows="3"
               v-model="cardPatterns"
               placeholder="例如：广告, 加微信, /^【.*】/"
-              @blur="save('群名片匹配内容')"
+              @blur="markDirty"
             ></textarea>
           </label>
           <p class="qg-hint tight">
@@ -146,40 +148,44 @@
             <code>/^【.*】/</code>。
           </p>
           <NoticeEditor title="命中通知" v-model="card.notice" hint="变量：{userId} {nickname} {groupId} {card} {word} {punish}" />
-          <div class="qg-actions"><button class="qg-btn primary sm" @click="save('群名片设置')">保存本项</button></div>
+          <div class="qg-actions">
+            <button class="qg-btn primary sm" :disabled="!dirty" @click="save('群名片设置')">保存本项</button>
+          </div>
         </Section>
 
         <!-- 群等级 -->
         <Section title="检测群等级" sub="群活跃等级" icon="📶" :open="true">
-          <ToggleRow label="启用此项检测" v-model="groupLevel.enabled" @update:model-value="save('群等级检测')" />
-          <ToggleRow label="最低群等级" type="number" v-model="groupLevel.minLevel" @update:model-value="save('群等级阈值')" title="低于该值时触发操作" />
+          <ToggleRow label="启用此项检测" v-model="groupLevel.enabled" @update:model-value="markDirty" />
+          <ToggleRow label="最低群等级" type="number" v-model="groupLevel.minLevel" @update:model-value="markDirty" title="低于该值时触发操作" />
           <ToggleRow
             label="触发操作"
             type="select"
             v-model="groupLevel.action"
             :options="actionOptions"
-            @update:model-value="save('群等级触发操作')"
+            @update:model-value="markDirty"
           />
           <ToggleRow
             label="禁言时长(分)"
             type="number"
             v-model="groupLevel.muteDuration"
             :disabled="groupLevel.action !== 'mute'"
-            @update:model-value="save('群等级禁言时长')"
+            @update:model-value="markDirty"
           />
           <ToggleRow
             label="取不到等级时"
             type="select"
             v-model="groupLevel.whenUnknown"
             :options="unknownOptions"
-            @update:model-value="save('群等级降级策略')"
+            @update:model-value="markDirty"
           />
           <p class="qg-hint tight">
             群等级来自 <code>get_group_member_info</code> / <code>get_group_member_list</code> 的
             <code>level</code> 字段（群内活跃等级）。LLBot 会直接返回该字段。
           </p>
           <NoticeEditor title="命中通知" v-model="groupLevel.notice" hint="变量：{userId} {nickname} {groupId} {level} {threshold} {punish}" />
-          <div class="qg-actions"><button class="qg-btn primary sm" @click="save('群等级设置')">保存本项</button></div>
+          <div class="qg-actions">
+            <button class="qg-btn primary sm" :disabled="!dirty" @click="save('群等级设置')">保存本项</button>
+          </div>
         </Section>
       </div>
 
@@ -219,6 +225,17 @@
           <p v-if="mc.hits?.length" class="qg-hint">共 {{ mc.hits.length }} 名成员会命中。实际执行还会受「冷却时间」影响。</p>
         </template>
       </Section>
+
+      <!-- 统一保存栏：本页不再实时保存，改动后在这里提交 -->
+      <div class="qg-actions sticky">
+        <button class="qg-btn primary" :disabled="saving || !dirty" @click="save('群员检查配置')">
+          {{ saving ? '保存中…' : '保存本群配置' }}
+        </button>
+        <button class="qg-btn" :disabled="!dirty" @click="discardChanges">放弃修改</button>
+        <span class="qg-muted">
+          {{ dirty ? '有未保存的改动' : '当前配置已保存' }} · 群 {{ currentGroupId }}
+        </span>
+      </div>
       </template>
     </template>
 
@@ -254,6 +271,19 @@ const currentGroupId = ref('')
 const manualGroupId = ref('')
 const cardPatterns = ref('')
 
+// 是否有未保存的改动。本页不再实时保存（避免每点一下开关都写库、
+// 也避免与「群配置详情」页互相覆盖），统一由保存按钮提交。
+const dirty = ref(false)
+const saving = ref(false)
+function markDirty() { dirty.value = true }
+
+// 放弃修改：重新拉取该群配置并回填表单（回填逻辑见下方 watch）
+function discardChanges() {
+  dirty.value = false
+  if (!currentGroupId.value) return
+  refreshPreview(undefined, true).then(() => { dirty.value = false })
+}
+
 const cfg = reactive<any>({
   enabled: false, intervalMinutes: 30, timeoutSeconds: 60, batchSize: 2,
   levelCacheHours: 6, maxFailRatio: 30, cooldownHours: 24, activeWithinDays: 0,
@@ -286,6 +316,9 @@ watch([currentGroupId, mc], () => {
   // 数据未就绪、或数据不属于当前群时先不回填（等新数据到达）
   if (!currentGroupId.value || !m) return
   if (mc.value?.groupId && String(mc.value.groupId) !== String(currentGroupId.value)) return
+  // 有未保存的改动时不要用服务端数据覆盖表单（例如预览刷新触发的重取），
+  // 否则用户正在编辑的内容会被静默丢弃。切换群时会先重置 dirty，所以不受影响。
+  if (dirty.value) return
   Object.assign(cfg, {
     enabled: !!m.enabled,
     intervalMinutes: m.intervalMinutes ?? 30,
@@ -329,6 +362,8 @@ watch([currentGroupId, mc], () => {
 watch(currentGroupId, (gid) => {
   // 上一个群的扫描错误提示不应带到新群
   scanErrors.value = []
+  // 切换群即放弃未保存的改动（表单会被新群数据覆盖）
+  dirty.value = false
   if (!gid) return
   refreshPreview(undefined, true)
 })
@@ -350,6 +385,8 @@ async function save(label: string) {
     toast.warning('请先选择群聊')
     return
   }
+  if (saving.value) return
+  saving.value = true
   const res = await mutate('setGroup', {
     groupId: currentGroupId.value,
     // 让后端重建 memberCheck 域（含预览数据）并随响应返回，免去保存后再发一次请求
@@ -357,13 +394,14 @@ async function save(label: string) {
     patch: {
       memberCheck: {
         enabled: cfg.enabled,
-        intervalMinutes: Number(cfg.intervalMinutes),
-        timeoutSeconds: Number(cfg.timeoutSeconds),
-        batchSize: Number(cfg.batchSize),
-        levelCacheHours: Number(cfg.levelCacheHours),
-        maxFailRatio: Number(cfg.maxFailRatio),
-        cooldownHours: Number(cfg.cooldownHours),
-        activeWithinDays: Number(cfg.activeWithinDays),
+        intervalMinutes: Number(cfg.intervalMinutes) || 30,
+        timeoutSeconds: Number(cfg.timeoutSeconds) || 60,
+        batchSize: Number(cfg.batchSize) || 2,
+        levelCacheHours: Number(cfg.levelCacheHours ?? 6),
+        maxFailRatio: Number(cfg.maxFailRatio ?? 30),
+        // 这两个允许为 0（0 = 不限制 / 检查全部成员），不能用 || 兜底
+        cooldownHours: Math.max(0, Number(cfg.cooldownHours) || 0),
+        activeWithinDays: Math.max(0, Number(cfg.activeWithinDays) || 0),
         qqLevel: {
           enabled: qq.enabled, minLevel: Number(qq.minLevel), action: qq.action,
           muteDuration: Number(qq.muteDuration), whenUnknown: qq.whenUnknown, notice: noticePatch(qq.notice),
@@ -382,8 +420,10 @@ async function save(label: string) {
       },
     },
   })
+  saving.value = false
   if (res?.ok) {
     toast.success(`${label}已保存`)
+    dirty.value = false
     invalidateScope('groups')
     invalidateScope('overview')
     // 直接用响应里带回来的最新数据，不再多发一次请求

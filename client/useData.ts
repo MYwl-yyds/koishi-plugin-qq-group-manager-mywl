@@ -23,6 +23,19 @@ const latest = new Map<string, any>()
 // 缓存有效期：10 秒内的重复请求直接复用，切页不卡
 const CACHE_TTL = 10_000
 
+// ========== 手动刷新信号 ==========
+// 顶部「刷新」按钮会 bump 这个计数器；所有已挂载的 useScope 都 watch 它，
+// 触发一次 force 重新取数。这样无需每个页面各自实现刷新逻辑。
+export const refreshTick = ref(0)
+export function refreshAll() {
+  // 只清「带参数的精确缓存」，不动 latest —— latest 是切页时立即出画面的兜底数据，
+  // 清掉它会让所有页面在刷新瞬间退回骨架屏。这里仅让后续请求跳过 CACHE_TTL 命中，
+  // 由各 useScope 的 watch(refreshTick) 以 force=true 重新取数。
+  for (const key of [...cache.keys()]) cache.delete(key)
+  pending.clear()
+  refreshTick.value++
+}
+
 export function invalidateScope(scope?: string) {
   if (scope) {
     cache.delete(scope)
@@ -111,6 +124,12 @@ export function useScope<T = any>(scope: string, options: {
         refresh(undefined, true)
       }, options.autoRefreshMs)
     }
+  })
+
+  // 顶部「刷新」按钮：收到信号后强制重新取数（跳过缓存）
+  watch(refreshTick, () => {
+    if (disposed) return
+    refresh(undefined, true)
   })
   onBeforeUnmount(() => {
     disposed = true

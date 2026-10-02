@@ -176,11 +176,14 @@ export class MemberCheckService {
       const session = this.sessionOf(gid)
       if (!session) return { ...empty, errors: ['未找到可用的 OneBot 机器人，无法执行群员检查'], durationMs: Date.now() - started }
 
+      // 超时改为由 runGroup 内部软处理（到点停止发起新请求并返回已完成的结果）。
+      // 这里仍套一层 withTimeout 作为「硬兜底」，但给它额外余量：
+      // 软超时会先触发并正常返回，硬超时只在底层接口彻底卡死时才会用到。
       const timeoutMs = Math.max(5, Number(cfg.memberCheck.timeoutSeconds) || 60) * 1000
       return await withTimeout(
         this.runGroup(session, cfg, gid, onlyKind, started),
-        timeoutMs,
-        `群 ${gid} 群员检查超时（${Math.round(timeoutMs / 1000)} 秒）`,
+        timeoutMs + 30000,
+        `群 ${gid} 群员检查超时（${Math.round(timeoutMs / 1000)} 秒，底层接口无响应）`,
       )
     } finally {
       this.running.delete(gid)
@@ -211,6 +214,10 @@ export class MemberCheckService {
     started: number,
   ): Promise<MemberCheckResult> {
     const mc = cfg.memberCheck
+    // 软超时截止时间：到达后停止发起新的接口请求，但保留已完成的结果。
+    // deadline 为 0 表示不限制。
+    const timeoutMs = Math.max(5, Number(mc.timeoutSeconds) || 60) * 1000
+    const deadline = started + timeoutMs
     const result: MemberCheckResult = {
       groupId: gid, scanned: 0, checked: 0, hits: 0,
       actions: { mute: 0, kick: 0, notice: 0, skipped: 0 },
@@ -275,17 +282,48 @@ export class MemberCheckService {
     // 统计接口失败率：大面积失败通常是限流征兆，必须中止以免误伤整群
     let qqFailed = 0
     let qqAttempted = 0
+    // 软超时：不再用 withTimeout 一刀切断整个 runGroup（那会把已经查到的结果全部丢掉，
+    // 大群必然触发）。这里改为「到点就停止发起新的请求」，已完成的部分照常返回。
+    // 已缓存的等级（getStrangerInfo 内部有 5 分钟~levelCacheHours 的缓存）下一轮直接命中，
+    // 因此大群会分几轮逐步补全，而不是每轮都从头重来。
+    let timedOut = false
+    // 因超时而「未发起请求」的成员数：不计入失败率，否则大群每轮都会触发失败率保护而无法推进
+    let qqSkippedByTimeout = 0
+    // 本轮真正发起过查询的成员（含查询失败）。用于区分「查了但没拿到」和「根本还没查」：
+    // 前者才允许走 whenUnknown 的降级策略，后者必须直接跳过。
+    const qqLevelQueried = new Set<string>()
     if (needQqLevel && targets.length > 0) {
       const infos = await mapConcurrent(targets.map((m) => m.userId), concurrency, async (uid) => {
+        // 已到截止时间：不再发起新请求，标记为「本轮跳过」（不是失败）
+        if (deadline > 0 && Date.now() >= deadline) {
+          timedOut = true
+          return { uid, level: null, skipped: true }
+        }
         const info = await this.svc.onebot.getStrangerInfo(session, uid, levelTtl, 1)
         const level = info && typeof info.level === 'number' && info.level >= 1 ? info.level : null
-        return [uid, level] as [string, number | null]
+        return { uid, level, skipped: false }
       })
-      for (const [uid, level] of infos) {
+      for (const r of infos) {
+        qqLevelMap.set(r.uid, r.level)
+        // 超时跳过与真正的接口失败分开统计
+        if (r.skipped) { qqSkippedByTimeout++; continue }
+        qqLevelQueried.add(r.uid)
         qqAttempted++
-        if (level === null) qqFailed++
-        qqLevelMap.set(uid, level)
+        if (r.level === null) qqFailed++
       }
+    }
+
+    // 记录软超时：本轮结果不完整，提示用户（但不影响已完成的处理）
+    if (timedOut) {
+      result.errors.push(
+        `扫描达到单群超时上限（${Math.round(timeoutMs / 1000)} 秒），本轮提前结束，`
+        + `本轮跳过 ${qqSkippedByTimeout} 人（已完成的部分正常生效）。`
+        + `已获取的等级会被缓存，下一轮扫描会继续处理剩余成员且更快。`
+        + `成员较多时建议：提高「单群超时」、增大「扫描间隔」，或调大「等级缓存」。`,
+      )
+      this.log().warn(
+        `群 ${gid} 群员检查达到超时上限（${Math.round(timeoutMs / 1000)}s），本轮跳过 ${qqSkippedByTimeout} 人`,
+      )
     }
 
     // 失败率保护：超过阈值直接中止本群检查，不执行任何处罚。
@@ -305,7 +343,8 @@ export class MemberCheckService {
 
     // 群等级补拉同样做失败保护，并改用 Map 回填（原实现对每个成员 findIndex，大群下是 O(n²)）
     let groupLevelFailed = 0
-    if (groupLevelMissing.length > 0) {
+    // 群等级接口是批量调用（一次拉一批），剩余时间不足时整批跳过，不计入失败率
+    if (groupLevelMissing.length > 0 && (deadline === 0 || Date.now() < deadline)) {
       const infos = await this.svc.onebot.getMembersInfo(session, gid, groupLevelMissing, concurrency)
       // 显式写成 [string, number] 元组并标注 Map 泛型：
       // 否则 TS 会把数组字面量推断成 (string | number)[]，导致 idx 变成 string | number，
@@ -347,12 +386,23 @@ export class MemberCheckService {
       whitelistIds = new Set((wl || []).map((w: any) => String(w.userId)))
     }
 
+    // 因本轮超时而被跳过的成员：绝不能进入处罚判定。
+    // 否则当 whenUnknown='trigger' 时，一次超时会把大量成员当成「等级获取失败」而批量处罚，
+    // 这正是大群最危险的误伤场景。
+    // 判据：需要查 QQ 等级、且本轮没有对它发起过查询。
+    const isTimeoutSkipped = (uid: string) => needQqLevel && !qqLevelQueried.has(uid)
+
     for (const m of targets) {
       result.checked++
       const hits: MemberCheckHit[] = []
 
       // 1. QQ 账号等级
       if (needQqLevel && mc.qqLevel.enabled) {
+        // 本轮超时未查询该成员：直接跳过，不做任何判定
+        if (isTimeoutSkipped(m.userId)) {
+          result.actions.skipped++
+          continue
+        }
         const level = qqLevelMap.get(m.userId)
         if (level === null || level === undefined) {
           if (mc.qqLevel.whenUnknown === 'trigger') {

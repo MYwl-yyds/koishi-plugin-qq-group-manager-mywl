@@ -55,6 +55,11 @@
           </div>
           <div class="qg-topbar-right">
             <span v-if="updatedText" class="qg-updated">{{ updatedText }}</span>
+            <!-- 手动刷新：清本地缓存并让所有页面重新取数，用于同步插件端最新数据 -->
+            <button class="qg-icon-btn" :class="{ spinning: refreshing }" :disabled="refreshing"
+              :title="refreshing ? '正在刷新…' : '刷新数据（同步插件端最新配置）'" @click="onRefresh">
+              ⟳
+            </button>
             <select v-model="theme" class="qg-theme-select" title="主题配色" @change="applyTheme">
               <option v-for="t in themes" :key="t.value" :value="t.value">{{ t.label }}</option>
             </select>
@@ -89,7 +94,7 @@ import Permissions from './pages/Permissions.vue'
 import Settings from './pages/Settings.vue'
 import Backup from './pages/Backup.vue'
 import { toasts } from './toast'
-import { invalidateScope, lastLoadedAt } from './useData'
+import { invalidateScope, lastLoadedAt, refreshAll } from './useData'
 import { currentPage, gotoPage } from './nav'
 
 // 页面按功能域重新归类：
@@ -215,6 +220,20 @@ function applyTheme() {
   localStorage.setItem('qg-theme', theme.value)
 }
 
+// 手动刷新：清本地缓存 → 通知所有已挂载的页面重新取数。
+// 各页面的 useScope 会 watch refreshTick 并以 force=true 重新请求，
+// 因此这里无需知道当前是哪个页面。
+const refreshing = ref(false)
+let refreshTimer: any = null
+function onRefresh() {
+  if (refreshing.value) return
+  refreshing.value = true
+  refreshAll()
+  // 用固定时长做转圈动画（各页面请求完成时间不一，这里只表示「已触发」）
+  if (refreshTimer) clearTimeout(refreshTimer)
+  refreshTimer = setTimeout(() => { refreshing.value = false }, 600)
+}
+
 onMounted(() => {
   applyTheme()
   tickTimer = setInterval(() => { now.value = Date.now() }, 1000)
@@ -235,6 +254,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (tickTimer) clearInterval(tickTimer)
+  if (refreshTimer) clearTimeout(refreshTimer)
   if (mq) mq.removeEventListener('change', onViewportChange)
   if (typeof window !== 'undefined') {
     window.removeEventListener('keydown', onKeydown)
@@ -246,6 +266,28 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .qg-updated { font-size: 12px; color: var(--qg-muted); }
+
+/* 顶栏图标按钮（刷新） */
+.qg-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border: 1px solid var(--qg-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--qg-text-2);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.qg-icon-btn:hover:not(:disabled) { background: var(--qg-hover); color: var(--qg-text); border-color: var(--qg-muted); }
+.qg-icon-btn:disabled { cursor: default; opacity: .7; }
+.qg-icon-btn.spinning { animation: qg-spin .65s linear infinite; }
+@keyframes qg-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* 移动端汉堡按钮：默认隐藏，仅在 ≤760px 显示。
    刻意只用 CSS 控制显隐（而非 v-if），保证与 styles.css 的断点完全一致。 */

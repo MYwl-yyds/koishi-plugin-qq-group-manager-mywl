@@ -356,10 +356,16 @@
           </div>
 
           <h4 class="qg-sub-title">扫描调度（本群）</h4>
+          <p class="qg-hint tight">
+            这些参数与「群员检查」页面完全同步（同一份群级配置），在哪边改都可以。
+            大群建议：并发 1~2、等级缓存 12~24 小时、扫描间隔 ≥60 分钟。
+          </p>
           <div class="qg-grid four">
             <ToggleRow label="扫描间隔(分)" type="number" v-model="form.mcIntervalMinutes" title="本群每隔多久自动扫描一次" />
-            <ToggleRow label="单群超时(秒)" type="number" v-model="form.mcTimeoutSeconds" />
-            <ToggleRow label="并发数" type="number" v-model="form.mcBatchSize" title="同时拉取 QQ 等级 / 群等级的并发请求数" />
+            <ToggleRow label="单群超时(秒)" type="number" v-model="form.mcTimeoutSeconds" title="超过该时长结束本次扫描并保留已完成的结果" />
+            <ToggleRow label="并发数" type="number" v-model="form.mcBatchSize" title="同时拉取 QQ 等级 / 群等级的并发请求数。大群建议 1~2，过高会触发协议端限流" />
+            <ToggleRow label="等级缓存(小时)" type="number" v-model="form.mcLevelCacheHours" title="同一成员在该时间内重复扫描不再请求接口。大群建议 6~24 小时，是避免限流最有效的手段" />
+            <ToggleRow label="失败率上限(%)" type="number" v-model="form.mcMaxFailRatio" title="一次检查中超过该比例的成员取不到有效等级时，判定为协议端限流并立即中止（不执行任何处罚）" />
             <ToggleRow label="冷却时间(小时)" type="number" v-model="form.mcCooldownHours" title="同一成员在该时间内不会重复处罚，0 表示不限制" />
             <ToggleRow label="仅检查活跃成员" type="number" v-model="form.mcActiveWithinDays" title="仅检查最近 N 天内发言过的成员，0 表示不限" />
           </div>
@@ -635,10 +641,13 @@ function fillFrom(cfg: any, g: any) {
   form.mcGroupAction = mc?.groupLevel?.action ?? 'none'
   form.mcGroupMuteDuration = mc?.groupLevel?.muteDuration ?? 10
   form.mcGroupWhenUnknown = mc?.groupLevel?.whenUnknown ?? 'skip'
-  // 调度参数同样是群级配置
+  // 调度参数同样是群级配置。默认值必须与「群员检查」页面、constants.ts 完全一致，
+  // 否则两个页面各自保存时会用不同的默认值互相覆盖，表现为「开关/参数同步不了」。
   form.mcIntervalMinutes = mc?.intervalMinutes ?? 30
   form.mcTimeoutSeconds = mc?.timeoutSeconds ?? 60
-  form.mcBatchSize = mc?.batchSize ?? 4
+  form.mcBatchSize = mc?.batchSize ?? 2
+  form.mcLevelCacheHours = mc?.levelCacheHours ?? 6
+  form.mcMaxFailRatio = mc?.maxFailRatio ?? 30
   form.mcCooldownHours = mc?.cooldownHours ?? 24
   form.mcActiveWithinDays = mc?.activeWithinDays ?? 0
 
@@ -752,12 +761,18 @@ async function save() {
     },
     memberCheck: {
       enabled: !!form.mcEnabled,
-      // 调度参数为群级配置（群员检查不参与全局回退）
+      // 调度参数为群级配置（群员检查不参与全局回退）。
+      // 注意：这里必须把 memberCheck 的每个字段都写全，且默认值与其他页面保持一致；
+      // 漏发字段会被 mergeDeep 保留旧值，而默认值不一致则会互相覆盖。
       intervalMinutes: Number(form.mcIntervalMinutes) || 30,
       timeoutSeconds: Number(form.mcTimeoutSeconds) || 60,
-      batchSize: Number(form.mcBatchSize) || 4,
-      cooldownHours: Number(form.mcCooldownHours) || 0,
-      activeWithinDays: Number(form.mcActiveWithinDays) || 0,
+      batchSize: Number(form.mcBatchSize) || 2,
+      levelCacheHours: Number(form.mcLevelCacheHours ?? 6),
+      maxFailRatio: Number(form.mcMaxFailRatio ?? 30),
+      // cooldownHours / activeWithinDays 允许为 0（0 = 不限制 / 检查全部成员），
+      // 因此不能用 `|| 默认值`，否则 0 会被错误地替换成默认值。
+      cooldownHours: Math.max(0, Number(form.mcCooldownHours) || 0),
+      activeWithinDays: Math.max(0, Number(form.mcActiveWithinDays) || 0),
       qqLevel: mcRule(form.mcQqEnabled, form.mcQqAction, form.mcQqMuteDuration, {
         minLevel: Number(form.mcQqMinLevel),
         whenUnknown: form.mcQqWhenUnknown,
