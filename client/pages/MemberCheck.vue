@@ -41,9 +41,17 @@
             <h4>扫描参数（本群）</h4>
             <ToggleRow label="扫描间隔(分)" type="number" v-model="cfg.intervalMinutes" @update:model-value="save('扫描间隔')" title="本群两次扫描的最小间隔" />
             <ToggleRow label="单群超时(秒)" type="number" v-model="cfg.timeoutSeconds" @update:model-value="save('单群超时')" title="超过该时长跳过本群，避免卡死" />
-            <ToggleRow label="并发请求数" type="number" v-model="cfg.batchSize" @update:model-value="save('并发数')" title="调用 OneBot 接口的并发数，过大可能触发风控" />
+            <ToggleRow label="并发请求数" type="number" v-model="cfg.batchSize" @update:model-value="save('并发数')" title="调用 OneBot 接口的并发数。大群建议 1~2，过高会触发协议端限流，导致等级读取失败" />
+            <ToggleRow label="等级缓存(小时)" type="number" v-model="cfg.levelCacheHours" @update:model-value="save('等级缓存')" title="同一成员在该时间内重复扫描不再请求接口。大群建议 6~24 小时，是避免限流最有效的手段" />
+            <ToggleRow label="失败率上限(%)" type="number" v-model="cfg.maxFailRatio" @update:model-value="save('失败率上限')" title="一次检查中超过该比例的成员取不到有效等级时，判定为协议端限流并立即中止检查（不执行任何处罚），避免整群误判" />
             <ToggleRow label="冷却时间(小时)" type="number" v-model="cfg.cooldownHours" @update:model-value="save('冷却时间')" title="同一成员在该时间内不重复处理" />
             <ToggleRow label="仅活跃成员(天)" type="number" v-model="cfg.activeWithinDays" @update:model-value="save('活跃范围')" title="0 表示检查全部成员" />
+            <p class="qg-hint tight">
+              大群提示：QQ 等级需要逐人调用 <code>get_stranger_info</code>，人数多时容易被协议端限流。
+              建议「并发请求数」设为 1~2、「等级缓存」设为 6~24 小时、「仅活跃成员」设为 7~30 天，
+              可大幅降低请求量。若接口返回的等级为 <code>0</code>，系统会视为「读取失败」而非真实等级，
+              并按各规则里的「等级获取失败时」设置处理，不会因此误伤群员。
+            </p>
           </div>
           <div class="qg-card flat">
             <h4>最近一次执行</h4>
@@ -185,6 +193,9 @@
         </div>
 
         <template v-if="mc">
+          <div v-if="scanErrors.length" class="qg-scan-errors">
+            <p v-for="(e, i) in scanErrors" :key="i" class="qg-error">{{ e }}</p>
+          </div>
           <p v-if="mc.previewError" class="qg-error">{{ mc.previewError }}</p>
           <EmptyState v-else-if="!mc.hits?.length" text="没有成员命中当前规则" icon="🎉" sm />
           <div v-else class="qg-table-wrap" style="margin-top:10px">
@@ -217,7 +228,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { useScope, mutate, invalidateScope, relativeTime, splitList } from '../useData'
+import { useScope, mutate, invalidateScope, applyMutated, relativeTime, splitList } from '../useData'
 import { toast } from '../toast'
 import Section from '../components/Section.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -231,24 +242,27 @@ const actionOptions = [
   { label: '踢出', value: 'kick' },
 ]
 const unknownOptions = [
-  { label: '跳过（安全）', value: 'skip' },
-  { label: '视为命中', value: 'trigger' },
+  { label: '跳过（安全，推荐）', value: 'skip' },
+  { label: '视为命中（注意：大群限流时会误伤）', value: 'trigger' },
 ]
 
 const scanning = ref(false)
 const previewing = ref(false)
+// 本次手动扫描返回的错误 / 中止原因（如接口限流导致中止）
+const scanErrors = ref<string[]>([])
 const currentGroupId = ref('')
 const manualGroupId = ref('')
 const cardPatterns = ref('')
 
 const cfg = reactive<any>({
-  enabled: false, intervalMinutes: 30, timeoutSeconds: 60, batchSize: 4, cooldownHours: 24, activeWithinDays: 0,
+  enabled: false, intervalMinutes: 30, timeoutSeconds: 60, batchSize: 2,
+  levelCacheHours: 6, maxFailRatio: 30, cooldownHours: 24, activeWithinDays: 0,
 })
 const qq = reactive<any>({ enabled: false, minLevel: 8, action: 'none', muteDuration: 10, whenUnknown: 'skip', notice: {} })
 const card = reactive<any>({ enabled: false, matchMode: 'contains', caseSensitive: false, excludeAdmins: true, excludeWhitelist: true, action: 'none', muteDuration: 10, notice: {} })
 const groupLevel = reactive<any>({ enabled: false, minLevel: 1, action: 'none', muteDuration: 10, whenUnknown: 'skip', notice: {} })
 
-const { data, loading, error, refresh } = useScope<any>('settings')
+const { data, loading, error } = useScope<any>('settings')
 const { data: groupList } = useScope<any>('groups')
 const { data: mc, refresh: refreshPreview } = useScope<any>('memberCheck', {
   params: () => ({ groupId: currentGroupId.value }),
@@ -276,7 +290,9 @@ watch([currentGroupId, mc], () => {
     enabled: !!m.enabled,
     intervalMinutes: m.intervalMinutes ?? 30,
     timeoutSeconds: m.timeoutSeconds ?? 60,
-    batchSize: m.batchSize ?? 4,
+    batchSize: m.batchSize ?? 2,
+    levelCacheHours: m.levelCacheHours ?? 6,
+    maxFailRatio: m.maxFailRatio ?? 30,
     cooldownHours: m.cooldownHours ?? 24,
     activeWithinDays: m.activeWithinDays ?? 0,
   })
@@ -311,6 +327,8 @@ watch([currentGroupId, mc], () => {
 
 // 切换群时拉取该群的配置与预览
 watch(currentGroupId, (gid) => {
+  // 上一个群的扫描错误提示不应带到新群
+  scanErrors.value = []
   if (!gid) return
   refreshPreview(undefined, true)
 })
@@ -334,12 +352,16 @@ async function save(label: string) {
   }
   const res = await mutate('setGroup', {
     groupId: currentGroupId.value,
+    // 让后端重建 memberCheck 域（含预览数据）并随响应返回，免去保存后再发一次请求
+    scope: 'memberCheck',
     patch: {
       memberCheck: {
         enabled: cfg.enabled,
         intervalMinutes: Number(cfg.intervalMinutes),
         timeoutSeconds: Number(cfg.timeoutSeconds),
         batchSize: Number(cfg.batchSize),
+        levelCacheHours: Number(cfg.levelCacheHours),
+        maxFailRatio: Number(cfg.maxFailRatio),
         cooldownHours: Number(cfg.cooldownHours),
         activeWithinDays: Number(cfg.activeWithinDays),
         qqLevel: {
@@ -364,7 +386,8 @@ async function save(label: string) {
     toast.success(`${label}已保存`)
     invalidateScope('groups')
     invalidateScope('overview')
-    refreshPreview(undefined, true)
+    // 直接用响应里带回来的最新数据，不再多发一次请求
+    applyMutated(res, 'memberCheck', mc)
   } else {
     toast.error(res?.error || '保存失败')
   }
@@ -372,11 +395,15 @@ async function save(label: string) {
 
 async function scanAll() {
   scanning.value = true
-  const res = await mutate('memberCheck.scanAll', {})
+  // 「最近一次执行」由 settings 域提供，指定它以便直接采用响应数据
+  const res = await mutate('memberCheck.scanAll', { scope: 'settings' })
   scanning.value = false
   if (res?.ok) {
     toast.success('全量群员检查已完成')
-    refresh(undefined, true)
+    // settings 域里的「最近一次执行」直接采用；mc 是另一个域，不能拿这份数据去覆盖
+    applyMutated(res, 'settings', data)
+    // 当前群的预览命中结果也可能变化，静默拉一次
+    refreshPreview()
   } else {
     toast.error(res?.error || '检查失败')
   }
@@ -388,8 +415,20 @@ async function scanOne() {
   const res = await mutate('memberCheck.scan', { groupId: currentGroupId.value })
   scanning.value = false
   if (res?.ok) {
-    toast.success(`群 ${currentGroupId.value} 检查完成`)
-    refresh(undefined, true)
+    // 本次扫描的错误/中止原因（例如接口限流导致中止）需要明确告知，不能静默成功
+    // 本次扫描的错误/中止原因（例如接口限流导致中止）需要明确告知，不能静默成功。
+    // lastResults 里同时包含其它群的结果，按当前群号匹配。
+    const rows: any[] = res.data?.lastResults ?? []
+    const mine = rows.find((r) => String(r.groupId) === String(currentGroupId.value)) ?? rows[0]
+    const errs: string[] = mine?.errors ?? []
+    scanErrors.value = errs
+    if (errs.length > 0) {
+      toast.warning(`群 ${currentGroupId.value} 检查已中止或存在异常，请查看下方提示`)
+    } else {
+      toast.success(`群 ${currentGroupId.value} 检查完成`)
+    }
+    // 响应带回了该群最新的 memberCheck 数据（含预览命中），直接采用
+    if (!applyMutated(res, 'memberCheck', mc)) refreshPreview(undefined, true)
   } else {
     toast.error(res?.error || '检查失败')
   }
@@ -416,5 +455,15 @@ function actionTagClass(kind: string): string {
 <style scoped>
 .qg-run-list { display: flex; flex-direction: column; gap: 5px; max-height: 150px; overflow-y: auto; }
 .qg-run-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; }
+/* 扫描中止 / 接口异常的提示块：需要足够醒目，避免管理员误以为检查正常完成 */
+.qg-scan-errors {
+  border: 1px solid var(--qg-danger);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+}
+.qg-scan-errors .qg-error { margin: 0; }
+.qg-scan-errors .qg-error + .qg-error { margin-top: 6px; }
 code { background: var(--qg-hover); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
 </style>

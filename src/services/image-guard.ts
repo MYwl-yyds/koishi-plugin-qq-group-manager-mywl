@@ -26,6 +26,9 @@ export class ImageGuardService {
   private ctx: Context
   private store: any
   private log: any
+  // OneBot 服务：用于在消息段只带 file 文件名/本地路径时，用 get_image 换取真实下载地址。
+  // 由 services/index.ts 在构造后注入，避免与 OneBotService 形成构造期循环依赖。
+  private onebot: any = null
   // 样本哈希缓存，避免每条消息都查一次数据库。
   // 按 groupId 分桶：'__global__' 存全局样本，其余按群号存「全局 + 本群」的合并结果。
   private cache = new Map<string, { at: number, rows: BannedImageEntry[] }>()
@@ -36,6 +39,11 @@ export class ImageGuardService {
     this.ctx = ctx
     this.store = store
     this.log = ctx.logger('image-guard')
+  }
+
+  // 注入 OneBot 服务（在 createServices 中调用）
+  attachOnebot(onebot: any): void {
+    this.onebot = onebot
   }
 
   invalidate(): void {
@@ -93,14 +101,53 @@ export class ImageGuardService {
     }
   }
 
-  // 从 session 中收集所有图片地址
-  static imageUrls(session: Session): string[] {
+  // 从 OneBot 消息段数组里取出图片地址。
+  // 各协议端字段名不统一：url / src / file 都可能是图片地址，
+  // 部分实现还会把真实地址放在 data.url，或用 file:// 与 base64 表示本地图。
+  // 这里只收集可直接下载的 http(s) 地址。
+  static imageUrlsFromSegments(segments: any): string[] {
     const urls: string[] = []
-    for (const el of (session as any).elements || []) {
-      if (el.type !== 'image') continue
-      const url = el.attrs?.url || el.attrs?.src || el.attrs?.file
-      // 仅处理 http(s) 来源；file:// 与 base64 无法直接下载
-      if (typeof url === 'string' && /^https?:\/\//i.test(url)) urls.push(url)
+    if (!Array.isArray(segments)) return urls
+    for (const seg of segments) {
+      if (!seg) continue
+      // 兼容 { type:'image', data:{...} } 与 { type:'image', attrs:{...} } 两种形态
+      if (seg.type !== 'image' && seg.type !== 'face' && seg.type !== 'mface') continue
+      const d = seg.data ?? seg.attrs ?? {}
+      for (const key of ['url', 'src', 'file', 'path']) {
+        const v = d[key]
+        if (typeof v === 'string' && /^https?:\/\//i.test(v)) {
+          if (!urls.includes(v)) urls.push(v)
+          break
+        }
+      }
+    }
+    return urls
+  }
+
+  // 从 session 中收集所有图片地址（同步可得的 http 地址）
+  static imageUrls(session: Session): string[] {
+    return ImageGuardService.imageUrlsFromSegments((session as any).elements)
+  }
+
+  // 收齐一条消息里所有可下载的图片地址：
+  // 先取段里直接给出的 http 地址，再对「只有 file 文件名/本地路径」的图片段
+  // 调用 get_image 换取真实地址（QQ 表情、转发图片常见这种形态）。
+  private async collectUrls(session: Session): Promise<string[]> {
+    const urls = ImageGuardService.imageUrls(session)
+    const segs = ((session as any).elements || []) as any[]
+    for (const el of segs) {
+      const t = el?.type
+      if (t !== 'image' && t !== 'face' && t !== 'mface') continue
+      // 该段已经提供了 http 地址就跳过
+      const d = el?.attrs ?? el?.data ?? {}
+      const hasHttp = ['url', 'src', 'file', 'path'].some(
+        (k) => typeof d[k] === 'string' && /^https?:\/\//i.test(d[k]),
+      )
+      if (hasHttp) continue
+      const f = d.file ?? d.url
+      if (typeof f !== 'string' || !f || !this.onebot?.resolveImageUrl) continue
+      const real = await this.onebot.resolveImageUrl(session, f)
+      if (real && !urls.includes(real)) urls.push(real)
     }
     return urls
   }
@@ -110,7 +157,7 @@ export class ImageGuardService {
     if (!cfg?.enabled) return null
     const samples = await this.samples(groupId)
     if (samples.length === 0) return null
-    const urls = ImageGuardService.imageUrls(session)
+    const urls = await this.collectUrls(session)
     if (urls.length === 0) return null
 
     const threshold = Math.max(0, Math.min(64, Number(cfg.threshold ?? 8)))

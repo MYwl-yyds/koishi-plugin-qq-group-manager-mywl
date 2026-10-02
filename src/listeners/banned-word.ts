@@ -3,11 +3,43 @@ import { Services, BannedWordConfig, LinkGuardConfig, ImageGuardConfig, NoticeCo
 import { idOf } from '../utils'
 import { extractLinks, isWhitelisted } from '../services/link'
 
+// 只取消息里真正的「文本段」内容。
+//
+// 重要：不能回退到 session.content。在没有文本段时（纯图片 / 表情 / 语音消息），
+// Koishi 的 session.content 会是整条消息的序列化文本，里面包含图片的 url、
+// file 等数据（形如 [image:https://.../a.jpg]）。用它做链接检测会把
+// 「发了一张图/表情」误判成「发了链接」并处罚用户。
+// 因此这里只认 type==='text' 的段；没有文本段就返回空串，交给后续逻辑跳过。
 function plainText(session: Session): string {
-  const texts = (session.elements || [])
-    .filter((el: any) => el.type === 'text')
-    .map((el: any) => el.attrs?.content ?? '')
-  return texts.join('') || String(session.content ?? '')
+  const parts: string[] = []
+  for (const el of (session.elements || []) as any[]) {
+    if (el?.type !== 'text') continue
+    const v = el.attrs?.content ?? el.attrs?.text ?? ''
+    if (typeof v === 'string' && v) parts.push(v)
+  }
+  if (parts.length > 0) return parts.join('')
+  // 部分适配器不提供 elements，此时才退回 content，
+  // 但必须先剥掉图片/表情/文件等非文本段的序列化形式，避免误判。
+  const raw = String(session.content ?? '')
+  return raw ? stripSegmentMarkup(raw) : ''
+}
+
+// 去掉形如 [image:...] / <img ...> / [CQ:image,...] 的段标记，只留纯文本。
+// 同时把裸露的图片直链行丢弃，防止「图片地址」被当成用户发送的链接。
+function stripSegmentMarkup(raw: string): string {
+  return raw
+    // CQ 码：[CQ:image,file=xxx] / [CQ:face,id=1]
+    .replace(/\[CQ:[^\]]*\]/gi, ' ')
+    // Koishi 风格段标记：[image:https://...] / [face:text] / [mface:...]
+    // 段名可能含数字与下划线（如 at、mface、tts），因此用 [a-z0-9_]+
+    .replace(/\[[a-z0-9_]+:[^\]]*\]/gi, ' ')
+    // 其他可能的标签形式：<image ...>
+    .replace(/<[a-z0-9_]+[^>]*>/gi, ' ')
+    // 兜底：剥掉残留的裸图片直链（QQ 图片 CDN），它们不是用户手打的链接
+    .replace(/https?:\/\/[^\s]*qpic\.cn[^\s]*/gi, ' ')
+    .replace(/https?:\/\/[^\s]*qlogo\.cn[^\s]*/gi, ' ')
+    .replace(/https?:\/\/[^\s]*gtimg\.cn[^\s]*/gi, ' ')
+    .trim()
 }
 
 // 统一的处罚执行：撤回 / 禁言 / 踢出（禁言与踢出互斥，同时开启时执行禁言）

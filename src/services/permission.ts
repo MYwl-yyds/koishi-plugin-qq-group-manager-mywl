@@ -24,9 +24,6 @@ export const PERM_ITEMS: PermItem[] = [
   // ---- 入群审核 ----
   { key: '审核员', label: '审核员（同意/拒绝入群申请）', group: '入群审核', danger: true },
 
-  // ---- 举报 ----
-  { key: '举报', label: '举报（触发 AI 判定与处罚）', group: '举报', danger: true },
-
   // ---- 内容管理 ----
   { key: '设置精华', label: '设置精华', group: '内容管理' },
   { key: '取消精华', label: '取消精华', group: '内容管理' },

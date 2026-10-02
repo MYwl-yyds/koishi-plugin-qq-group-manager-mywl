@@ -226,7 +226,7 @@
 
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue'
-import { useScope, mutate, invalidateScope } from '../useData'
+import { useScope, mutate, invalidateScope, applyMutated } from '../useData'
 import { send } from '@koishijs/client'
 import { toast } from '../toast'
 import Section from '../components/Section.vue'
@@ -411,8 +411,10 @@ async function addSampleByUrl() {
     toast.success('已加入样本库')
     sampleUrl.value = ''
     sampleLabel.value = ''
-    invalidateScope('settings')
-    refresh(undefined, true)
+    if (!applyMutated(res, 'settings', data)) {
+      invalidateScope('settings')
+      refresh(undefined, true)
+    }
   } else {
     toast.error(res?.error || '添加失败')
   }
@@ -440,8 +442,10 @@ function onUpload(ev: Event) {
     if (res?.ok) {
       toast.success('已加入样本库')
       sampleLabel.value = ''
-      invalidateScope('settings')
-      refresh(undefined, true)
+      if (!applyMutated(res, 'settings', data)) {
+        invalidateScope('settings')
+        refresh(undefined, true)
+      }
     } else {
       toast.error(res?.error || '添加失败')
     }
@@ -454,8 +458,10 @@ async function removeSample(s: any) {
   const res = await mutate('image.sample.remove', { id: s.id })
   if (res?.ok) {
     toast.success('已删除样本')
-    invalidateScope('settings')
-    refresh(undefined, true)
+    if (!applyMutated(res, 'settings', data)) {
+      invalidateScope('settings')
+      refresh(undefined, true)
+    }
   } else {
     toast.error(res?.error || '删除失败')
   }
@@ -479,8 +485,11 @@ async function runImageTest() {
 function afterSave(res: any, okText: string) {
   if (res?.ok) {
     toast.success(okText)
-    invalidateScope('settings')
-    refresh(undefined, true)
+    // 后端已把重建后的 settings 数据一起返回，直接采用即可，无需再请求一次
+    if (!applyMutated(res, 'settings', data)) {
+      invalidateScope('settings')
+      refresh(undefined, true)
+    }
   } else {
     toast.error(res?.error || '保存失败')
   }
@@ -537,5 +546,11 @@ function onImageKickToggle(v: any) { if (v) image.banOnTrigger = false; saveImag
 .qg-sub-title { font-size: 13px; margin: 16px 0 8px; padding-top: 12px; border-top: 1px dashed var(--qg-border); }
 @media (max-width: 980px) {
   .qg-wl-item { grid-template-columns: 1fr 1fr; }
+}
+/* 手机竖屏：链接条目改为单列纵向堆叠，避免四列挤在一起无法阅读 */
+@media (max-width: 760px) {
+  .qg-wl-item { grid-template-columns: 1fr; gap: 7px; }
+  .qg-wl-test { flex-wrap: wrap; }
+  .qg-wl-test .qg-input { width: 100%; }
 }
 </style>

@@ -206,8 +206,15 @@ export interface MemberCheckConfig {
   intervalMinutes: number
   // 单个群的成员检查超时（秒），超时跳过本群
   timeoutSeconds: number
-  // 每批并发请求数，避免触发协议端风控
+  // 每批并发请求数，避免触发协议端风控。
+  // 大群建议保持 2：调高会显著增加被协议端限流的概率，进而导致等级读取失败/误判。
   batchSize: number
+  // QQ 等级缓存时长（小时）。同一成员在该时间内重复扫描不再请求接口。
+  // 大群强烈建议调大（默认 6 小时），这是避免限流最有效的手段。
+  levelCacheHours: number
+  // 接口失败率阈值（百分比）。一次检查中若超过该比例的成员取不到有效等级，
+  // 判定为协议端限流，立即中止本次检查且不执行任何处罚，避免整群误判。
+  maxFailRatio: number
   // 对同一成员的重复处理间隔（小时），避免反复禁言/踢出
   cooldownHours: number
   // 只检查最近 N 天内活跃（说过话）的成员，0 表示全部检查

@@ -29,17 +29,27 @@
         </nav>
 
         <div class="qg-nav-foot">
-          <button class="qg-nav-item" :title="collapsed ? '展开侧栏' : '收起侧栏'" @click="toggleCollapse">
+          <button
+            class="qg-nav-item"
+            :title="collapsed ? (isMobile ? '打开菜单' : '展开侧栏') : (isMobile ? '关闭菜单' : '收起侧栏')"
+            @click="toggleCollapse"
+          >
             <span class="qg-nav-icon">{{ collapsed ? '»' : '«' }}</span>
-            <span v-if="!collapsed" class="qg-nav-label">收起侧栏</span>
+            <span v-if="!collapsed" class="qg-nav-label">{{ isMobile ? '关闭菜单' : '收起侧栏' }}</span>
           </button>
         </div>
       </aside>
+
+      <!-- 移动端遮罩：点击即关闭抽屉。桌面端由 CSS 隐藏 -->
+      <div class="qg-backdrop" :class="{ show: !collapsed && isMobile }" @click="closeDrawer" />
 
       <!-- 主区域 -->
       <main class="qg-main">
         <header class="qg-topbar">
           <div class="qg-topbar-left">
+            <!-- 移动端汉堡按钮：小屏才显示（见下方 @media 规则），不依赖 JS 判定，
+                 避免 JS 状态与 CSS 断点出现瞬间不一致 -->
+            <button class="qg-burger" title="打开菜单" @click="openDrawer">☰</button>
             <h2 class="qg-page-title">{{ activeItem?.label }}</h2>
             <span class="qg-page-desc">{{ activeItem?.desc }}</span>
           </div>
@@ -66,7 +76,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Overview from './pages/Overview.vue'
 import Groups from './pages/Groups.vue'
 import GroupDetail from './pages/GroupDetail.vue'
@@ -143,6 +153,39 @@ const theme = ref(localStorage.getItem('qg-theme') || 'indigo')
 const now = ref(Date.now())
 let tickTimer: any = null
 
+// ---------- 移动端抽屉 ----------
+// 移动端把侧栏改为覆盖式抽屉：主区域占满整宽，侧栏用 transform 平移进出。
+// 这里只负责「是否移动端」和开关状态，具体样式见 styles.css 的 @media (max-width:760px)。
+const MOBILE_QUERY = '(max-width: 760px)'
+const isMobile = ref(false)
+let mq: MediaQueryList | null = null
+
+function openDrawer() { collapsed.value = false }
+function closeDrawer() { collapsed.value = true }
+
+function onViewportChange(e: MediaQueryListEvent | MediaQueryList) {
+  const mobile = e.matches
+  isMobile.value = mobile
+  // 切到移动端时默认收起侧栏，避免一进来就被抽屉遮住正文；
+  // 切回桌面端则恢复用户的展开/收起偏好。
+  if (mobile) {
+    collapsed.value = true
+  } else {
+    collapsed.value = localStorage.getItem('qg-collapsed') === '1'
+  }
+}
+
+// 移动端抽屉打开时按 Esc 关闭（桌面端无副作用）
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && isMobile.value && !collapsed.value) collapsed.value = true
+}
+
+// 抽屉展开时禁止背景滚动，避免手指滑动穿透到正文
+watch([isMobile, collapsed], ([mobile, isCollapsed]) => {
+  if (typeof document === 'undefined') return
+  document.body.style.overflow = mobile && !isCollapsed ? 'hidden' : ''
+})
+
 const activeItem = computed(() => flat.find((i) => i.key === currentPage.value) || flat[0])
 const activeComponent = computed(() => activeItem.value.component)
 const updatedText = computed(() => {
@@ -155,11 +198,16 @@ const updatedText = computed(() => {
 
 function go(key: string) {
   gotoPage(key)
+  // 移动端点击导航后自动关闭抽屉，否则会一直挡住内容
+  if (isMobile.value) collapsed.value = true
 }
 
 function toggleCollapse() {
   collapsed.value = !collapsed.value
-  localStorage.setItem('qg-collapsed', collapsed.value ? '1' : '0')
+  // 移动端的抽屉开关属于临时状态，不写入本地偏好
+  if (!isMobile.value) {
+    localStorage.setItem('qg-collapsed', collapsed.value ? '1' : '0')
+  }
 }
 
 function applyTheme() {
@@ -173,10 +221,58 @@ onMounted(() => {
   // 首次进入清掉可能已过期的本地缓存，保证拿到最新数据
   invalidateScope()
   lastLoadedAt.value = Date.now()
+
+  // 监听视口变化，决定侧栏是「常驻」还是「抽屉」
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    mq = window.matchMedia(MOBILE_QUERY)
+    onViewportChange(mq)
+    mq.addEventListener('change', onViewportChange)
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', onKeydown)
+  }
 })
-onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })
+
+onBeforeUnmount(() => {
+  if (tickTimer) clearInterval(tickTimer)
+  if (mq) mq.removeEventListener('change', onViewportChange)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('keydown', onKeydown)
+  }
+  // 组件卸载时恢复背景滚动，避免离开页面后页面锁死
+  if (typeof document !== 'undefined') document.body.style.overflow = ''
+})
 </script>
 
 <style scoped>
 .qg-updated { font-size: 12px; color: var(--qg-muted); }
+
+/* 移动端汉堡按钮：默认隐藏，仅在 ≤760px 显示。
+   刻意只用 CSS 控制显隐（而非 v-if），保证与 styles.css 的断点完全一致。 */
+.qg-burger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  margin-right: 4px;
+  border: 1px solid var(--qg-border);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--qg-text);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.qg-burger:hover { background: var(--qg-hover); border-color: var(--qg-muted); }
+.qg-burger:active { transform: scale(.96); }
+
+@media (max-width: 760px) {
+  .qg-burger { display: inline-flex; }
+  /* 顶栏左侧允许收缩，标题过长时省略而不撑破 */
+  .qg-topbar-left { flex: 1; min-width: 0; overflow: hidden; }
+  .qg-page-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
 </style>

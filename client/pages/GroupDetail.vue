@@ -421,7 +421,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useScope, mutate, invalidateScope } from '../useData'
+import { useScope, mutate, invalidateScope, applyMutated } from '../useData'
 import { gotoPage, takePageParams } from '../nav'
 import { toast } from '../toast'
 import Section from '../components/Section.vue'
@@ -792,7 +792,9 @@ async function save() {
   if (res?.ok) {
     toast.success('已保存该群配置')
     invalidateScope('groups')
-    refresh(undefined, true)
+    // 后端在 mutate 响应里已经带回了最新的 groupDetail 数据，直接采用，
+    // 不再多发一次 scope 请求（这是保存卡顿的主因）。
+    applyMutated(res, 'groupDetail', data)
   } else {
     toast.error(res?.error || '保存失败')
   }
@@ -805,7 +807,7 @@ async function resetGroup() {
   if (res?.ok) {
     toast.info('已重置为全局配置')
     invalidateScope('groups')
-    refresh(undefined, true)
+    applyMutated(res, 'groupDetail', data)
   } else {
     toast.error(res?.error || '重置失败')
   }
@@ -865,8 +867,7 @@ async function addGroupSample() {
   if (res?.ok) {
     toast.success('已加入本群样本库')
     imgSampleInput.value = ''
-    // 重新拉取群详情，groupImageSamples 会随新数据一起返回
-    await refresh(undefined, true)
+    applyMutated(res, 'groupDetail', data)
   } else {
     toast.error(res?.error || '添加失败')
   }
@@ -876,7 +877,7 @@ async function removeGroupSample(s: any) {
   const res = await mutate('image.sample.remove', { id: s.id, groupId: groupId.value })
   if (res?.ok) {
     toast.info('已移除该样本')
-    await refresh(undefined, true)
+    applyMutated(res, 'groupDetail', data)
   } else {
     toast.error(res?.error || '移除失败')
   }
@@ -903,4 +904,9 @@ onMounted(() => {
 .qg-sample-row code { background: var(--qg-hover); border-radius: 4px; padding: 1px 5px; font-size: 11.5px; }
 .qg-sample-row .qg-muted { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qg-sample-row.readonly { background: var(--qg-hover); opacity: .85; }
+/* 手机竖屏：样本行改为纵向堆叠，长哈希/备注不会把按钮挤出屏幕 */
+@media (max-width: 760px) {
+  .qg-sample-row { flex-wrap: wrap; }
+  .qg-sample-row .qg-muted { flex: 1 1 100%; white-space: normal; word-break: break-all; }
+}
 </style>

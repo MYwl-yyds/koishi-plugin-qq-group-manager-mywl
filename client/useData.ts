@@ -120,23 +120,54 @@ export function useScope<T = any>(scope: string, options: {
 }
 
 // ========== 变更 ==========
-// 变更成功后后端返回受影响的数据域，只需刷新该域。
-// 注意：缓存键是「域 + 参数」的，带参数的域（groupDetail / memberCheck）不能只按域名写缓存，
-// 否则写进去的条目永远不会被读到。这里只写「无参数域」的缓存，带参数的域交给 invalidateScope + refresh。
-const PARAM_SCOPES = new Set(['groupDetail', 'memberCheck'])
+// 变更成功后后端会重建受影响的数据域并连同数据一起返回（见 webui 的 handleMutate 末尾），
+// 因此这里应当**直接采用**返回的数据，而不是丢弃后再发一次 scope 请求 ——
+// 后者会让每次保存都变成两次串行往返，是「保存时很慢」的主因。
+//
+// 缓存写入规则：
+// - 无参数域（groups / settings / lists …）：写入以域名为键的缓存；
+// - 带参数域（groupDetail / memberCheck）：后端返回的是「本次操作对应的那份数据」，
+//   按 mutate 时传入的 params（或 groupId）拼出同样的键写入，这样页面下次读到的就是它。
+const PARAM_SCOPES: Record<string, string> = {
+  groupDetail: 'groupId',
+  memberCheck: 'groupId',
+}
+
 export async function mutate(action: string, payload: any = {}, extraParams: any = {}): Promise<any> {
   try {
     const res = await send('qq-guanqun/mutate', { action, data: payload })
-    // 仅当后端明确返回数据域时才写入缓存（测试类操作返回的是一次性结果，不能覆盖缓存）
-    if (res?.ok && res.scope && res.data !== undefined && !PARAM_SCOPES.has(res.scope)) {
-      cache.set(res.scope, { data: res.data, at: Date.now() })
-    } else if (res?.ok && res.scope) {
-      invalidateScope(res.scope)
+    if (res?.ok && res.scope) {
+      if (res.data !== undefined) {
+        // 带参数域：用 groupId 重建与 useScope 完全一致的缓存键
+        const paramKey = PARAM_SCOPES[res.scope]
+        if (paramKey) {
+          const gid = payload?.[paramKey]
+          if (gid !== undefined && gid !== null && gid !== '') {
+            cache.set(`${res.scope}:${JSON.stringify({ [paramKey]: String(gid) })}`, { data: res.data, at: Date.now() })
+          }
+          latest.set(res.scope, res.data)
+        } else {
+          cache.set(res.scope, { data: res.data, at: Date.now() })
+          latest.set(res.scope, res.data)
+        }
+      } else {
+        invalidateScope(res.scope)
+      }
     }
     return res
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
+}
+
+// 把某个变更返回的数据直接喂给页面（免去保存后再发一次请求）。
+// 只有「响应里的 scope 与目标域一致」时才采用，避免把 A 域的数据塞进 B 域的 ref
+// （例如 setGroup 返回的是 groupDetail，不能拿去填 lists）。
+// 用法：const res = await mutate(...); applyMutated(res, 'lists', myDataRef)
+export function applyMutated(res: any, scope: string, ...targets: Array<{ value: any } | undefined>) {
+  if (!res?.ok || res.data === undefined || res.scope !== scope) return false
+  for (const t of targets) if (t) t.value = res.data
+  return true
 }
 
 // 变更后再按需重新拉取（用于列表类域，保证分页/筛选条件正确）

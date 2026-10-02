@@ -80,7 +80,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useScope, mutate, invalidateScope, formatTime } from '../useData'
+import { useScope, mutate, invalidateScope, applyMutated, formatTime } from '../useData'
 import { takePageParams } from '../nav'
 import { toast } from '../toast'
 import Section from '../components/Section.vue'
@@ -127,8 +127,11 @@ function split(s: any): string[] {
 async function after(res: any, okText: string) {
   if (res?.ok) {
     toast.success(okText)
-    invalidateScope('lists')
-    refresh(undefined, true)
+    // 后端已把重建后的 lists 数据一起返回时直接采用，省掉一整轮额外请求
+    if (!applyMutated(res, 'lists', data)) {
+      invalidateScope('lists')
+      refresh(undefined, true)
+    }
   } else {
     toast.error(res?.error || '操作失败')
   }

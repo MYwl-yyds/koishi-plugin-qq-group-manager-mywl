@@ -1,5 +1,5 @@
 import { Context, Session } from 'koishi'
-import { Services, MemberCheckRule, Config } from '../types'
+import { Services, MemberCheckRule, MemberCheckState, Config } from '../types'
 // 仅用其类型，避免运行时依赖
 import type { MemberInfo } from './onebot'
 import { idOf, mapConcurrent, withTimeout } from '../utils'
@@ -217,7 +217,9 @@ export class MemberCheckService {
       errors: [], durationMs: 0,
     }
 
-    const members = await this.svc.onebot.getMemberList(session, gid, 0)
+    // 显式标注类型：Services.onebot 为 any，否则 members/targets 会被推断为 any，
+    // 进而让下面的 Map 索引操作触发 TS2538（null / {} 不能作为索引类型）。
+    const members: MemberInfo[] = await this.svc.onebot.getMemberList(session, gid, 0)
     result.scanned = members.length
     if (members.length === 0) {
       result.errors.push('未能获取群成员列表（协议端接口不可用或群号无效）')
@@ -227,15 +229,25 @@ export class MemberCheckService {
 
     // 机器人自身与超级管理员不参与检查
     const selfId = idOf((session.bot as any)?.selfId ?? (session.bot as any)?.userId)
-    const superUsers = new Set((await this.svc.settings.getGlobal()).superUsers || [])
+    const superUsers = new Set<string>((await this.svc.settings.getGlobal()).superUsers || [])
 
-    let targets = members.filter((m) => m.userId && m.userId !== selfId && !superUsers.has(m.userId))
+    let targets: MemberInfo[] = members.filter((m) => m.userId && m.userId !== selfId && !superUsers.has(m.userId))
+
+    // 一次性加载本群成员状态：既用于「仅检查最近活跃成员」的活跃时间，
+    // 也用于后面的检查冷却判断，避免大群下反复查库。
+    // 显式标注类型：Services.store 为 any，否则这里会被推断成 {}[] / null[]。
+    const memberStates: MemberCheckState[] = await this.svc.store.memberStateList(gid).catch(() => [])
+    // 元组断言 + Map 泛型：数组字面量默认推断为联合类型数组，会让 get() 的返回值类型失真
+    const stateMap = new Map<string, MemberCheckState>(
+      memberStates.map((s) => [String(s.userId), s] as [string, MemberCheckState]),
+    )
 
     // 仅检查最近活跃成员
     if (Number(mc.activeWithinDays) > 0) {
       const since = Date.now() - Number(mc.activeWithinDays) * 86400000
-      const states = await this.svc.store.memberStateList(gid)
-      const activeMap = new Map(states.map((s) => [String(s.userId), new Date(s.activeAt).getTime()]))
+      const activeMap = new Map<string, number>(
+        memberStates.map((s) => [String(s.userId), new Date(s.activeAt).getTime()] as [string, number]),
+      )
       const fallback = (m: MemberInfo) => (Number(m.lastSentTime) > 0 ? Number(m.lastSentTime) * 1000 : 0)
       targets = targets.filter((m) => {
         const at = Number(activeMap.get(m.userId) ?? 0)
@@ -251,25 +263,89 @@ export class MemberCheckService {
     const needGroupLevel = !!mc.groupLevel?.enabled && (!onlyKind || onlyKind === 'groupLevel')
     const groupLevelMissing = needGroupLevel ? targets.filter((m) => m.level < 0).map((m) => m.userId) : []
 
+    // 大群优化：
+    // - 并发默认降到 2（原为 4），显著降低触发协议端限流的概率；
+    // - 等级缓存默认 6 小时（可配），同一成员短期重复扫描不再发请求；
+    // - 失败重试 1 次并带退避，避免瞬时抖动被当成「等级 0」。
+    const concurrency = Math.max(1, Number(mc.batchSize) || 2)
+    const cacheHours = Math.max(0, Number(mc.levelCacheHours ?? 6))
+    const levelTtl = cacheHours * 3600000
+
     const qqLevelMap = new Map<string, number | null>()
+    // 统计接口失败率：大面积失败通常是限流征兆，必须中止以免误伤整群
+    let qqFailed = 0
+    let qqAttempted = 0
     if (needQqLevel && targets.length > 0) {
-      const infos = await mapConcurrent(targets.map((m) => m.userId), Math.max(1, Number(mc.batchSize) || 4), async (uid) => {
-        const info = await this.svc.onebot.getStrangerInfo(session, uid)
-        return [uid, info && typeof info.level === 'number' && info.level >= 0 ? info.level : null] as [string, number | null]
+      const infos = await mapConcurrent(targets.map((m) => m.userId), concurrency, async (uid) => {
+        const info = await this.svc.onebot.getStrangerInfo(session, uid, levelTtl, 1)
+        const level = info && typeof info.level === 'number' && info.level >= 1 ? info.level : null
+        return [uid, level] as [string, number | null]
       })
-      for (const [uid, level] of infos) qqLevelMap.set(uid, level)
+      for (const [uid, level] of infos) {
+        qqAttempted++
+        if (level === null) qqFailed++
+        qqLevelMap.set(uid, level)
+      }
     }
 
+    // 失败率保护：超过阈值直接中止本群检查，不执行任何处罚。
+    // 宁可这一轮不检查，也不能因为接口限流把整群成员误判为低等级。
+    const failRatio = qqAttempted > 0 ? qqFailed / qqAttempted : 0
+    const maxFailRatio = Math.min(Math.max(Number(mc.maxFailRatio ?? 30), 0), 100) / 100
+    if (needQqLevel && qqAttempted > 0 && failRatio > maxFailRatio) {
+      result.errors.push(
+        `QQ 等级接口大面积失败（${qqFailed}/${qqAttempted}，${Math.round(failRatio * 100)}%），`
+        + `超过阈值 ${Math.round(maxFailRatio * 100)}%，已中止本次检查以避免误判。`
+        + `常见原因为协议端限流，建议降低并发数或延长扫描间隔。`,
+      )
+      result.durationMs = Date.now() - started
+      this.log().warn(`群 ${gid} 群员检查中止：QQ 等级接口失败率 ${Math.round(failRatio * 100)}%（${qqFailed}/${qqAttempted}）`)
+      return result
+    }
+
+    // 群等级补拉同样做失败保护，并改用 Map 回填（原实现对每个成员 findIndex，大群下是 O(n²)）
+    let groupLevelFailed = 0
     if (groupLevelMissing.length > 0) {
-      const infos = await this.svc.onebot.getMembersInfo(session, gid, groupLevelMissing, Math.max(1, Number(mc.batchSize) || 4))
-      for (const [uid, info] of infos) {
-        const idx = targets.findIndex((m) => m.userId === uid)
-        if (idx >= 0) targets[idx] = { ...targets[idx], level: info.level }
+      const infos = await this.svc.onebot.getMembersInfo(session, gid, groupLevelMissing, concurrency)
+      // 显式写成 [string, number] 元组并标注 Map 泛型：
+      // 否则 TS 会把数组字面量推断成 (string | number)[]，导致 idx 变成 string | number，
+      // 作为数组下标时触发 TS2538。
+      const idxById = new Map<string, number>(targets.map((m, i) => [m.userId, i] as [string, number]))
+      for (const uid of groupLevelMissing) {
+        const info = infos.get(uid)
+        const idx = idxById.get(uid)
+        if (idx === undefined) continue
+        if (info && typeof info.level === 'number' && info.level >= 1) {
+          const cur = targets[idx]
+          targets[idx] = { ...cur, level: info.level }
+        } else {
+          groupLevelFailed++
+        }
+      }
+      const glRatio = groupLevelMissing.length > 0 ? groupLevelFailed / groupLevelMissing.length : 0
+      if (glRatio > maxFailRatio) {
+        result.errors.push(
+          `群等级接口大面积失败（${groupLevelFailed}/${groupLevelMissing.length}，${Math.round(glRatio * 100)}%），`
+          + `已中止本次检查以避免误判。`,
+        )
+        result.durationMs = Date.now() - started
+        this.log().warn(`群 ${gid} 群员检查中止：群等级接口失败率 ${Math.round(glRatio * 100)}%`)
+        return result
       }
     }
 
     const cooldownMs = Math.max(0, Number(mc.cooldownHours) || 0) * 3600000
     const now = Date.now()
+
+    // 预热白名单，避免在成员循环里逐条查库（大群下这是主要耗时来源之一）。
+    // 语义与 store.whitelistEntry 保持一致：applyGlobalWhitelist 为真时查全局条目，
+    // 否则查本群条目。
+    let whitelistIds = new Set<string>()
+    if (mc.card?.enabled && mc.card.excludeWhitelist !== false) {
+      const scopeId = cfg.applyGlobalWhitelist === true ? '' : gid
+      const wl = await this.svc.store.whitelistList(scopeId).catch(() => [])
+      whitelistIds = new Set((wl || []).map((w: any) => String(w.userId)))
+    }
 
     for (const m of targets) {
       result.checked++
@@ -300,8 +376,8 @@ export class MemberCheckService {
       // 2. 群名片
       if (mc.card?.enabled && (!onlyKind || onlyKind === 'card') && mc.card.patterns?.length) {
         const excludeAdmin = mc.card.excludeAdmins !== false && (m.role === 'admin' || m.role === 'owner')
-        const excludeWl = mc.card.excludeWhitelist !== false
-          && !!(await this.svc.store.whitelistEntry(m.userId, gid, cfg.applyGlobalWhitelist === true))
+        // 白名单已预加载到 Set，这里不再逐个查库
+        const excludeWl = mc.card.excludeWhitelist !== false && whitelistIds.has(String(m.userId))
         if (!excludeAdmin && !excludeWl) {
           const display = m.card || m.nickname || ''
           const word = matchCard(display, mc.card)
@@ -338,9 +414,9 @@ export class MemberCheckService {
       }
 
       for (const hit of hits) {
-        // 冷却：同一成员在冷却期内不重复处理
+        // 冷却：同一成员在冷却期内不重复处理（用预加载的 stateMap，避免逐条查库）
         if (cooldownMs > 0) {
-          const state = await this.svc.store.memberStateGet(gid, m.userId)
+          const state = stateMap.get(String(m.userId))
           const checkedAt = state?.checkedAt ? new Date(state.checkedAt).getTime() : 0
           if (checkedAt && now - checkedAt < cooldownMs) {
             result.actions.skipped++
@@ -446,26 +522,47 @@ export class MemberCheckService {
     const session = this.sessionOf(gid)
     if (!session) return []
     const mc = cfg.memberCheck
-    const members = await this.svc.onebot.getMemberList(session, gid, 0)
+    const members: MemberInfo[] = await this.svc.onebot.getMemberList(session, gid, 0)
     const selfId = idOf((session.bot as any)?.selfId ?? (session.bot as any)?.userId)
-    const superUsers = new Set((await this.svc.settings.getGlobal()).superUsers || [])
-    const targets = members.filter((m) => m.userId && m.userId !== selfId && !superUsers.has(m.userId))
+    const superUsers = new Set<string>((await this.svc.settings.getGlobal()).superUsers || [])
+    const targets: MemberInfo[] = members.filter((m) => m.userId && m.userId !== selfId && !superUsers.has(m.userId))
     const hits: MemberCheckHit[] = []
 
     const needQqLevel = !!mc.qqLevel?.enabled && (!kind || kind === 'qqLevel')
     const qqLevelMap = new Map<string, number | null>()
     if (needQqLevel) {
-      const infos = await mapConcurrent(targets.map((m) => m.userId), Math.max(1, Number(mc.batchSize) || 4), async (uid) => {
-        const info = await this.svc.onebot.getStrangerInfo(session, uid)
-        return [uid, info && typeof info.level === 'number' && info.level >= 0 ? info.level : null] as [string, number | null]
+      // 与 runGroup 保持一致：低并发、长缓存、带退避重试，避免大群预览触发限流
+      const concurrency = Math.max(1, Number(mc.batchSize) || 2)
+      const levelTtl = Math.max(0, Number(mc.levelCacheHours ?? 6)) * 3600000
+      const infos = await mapConcurrent(targets.map((m) => m.userId), concurrency, async (uid) => {
+        const info = await this.svc.onebot.getStrangerInfo(session, uid, levelTtl, 1)
+        return [uid, info && typeof info.level === 'number' && info.level >= 1 ? info.level : null] as [string, number | null]
       })
       for (const [uid, level] of infos) qqLevelMap.set(uid, level)
+    }
+
+    // 白名单预加载，避免逐成员查库
+    let whitelistIds = new Set<string>()
+    if (mc.card?.enabled && mc.card.excludeWhitelist !== false) {
+      const scopeId = cfg.applyGlobalWhitelist === true ? '' : gid
+      const wl = await this.svc.store.whitelistList(scopeId).catch(() => [])
+      whitelistIds = new Set((wl || []).map((w: any) => String(w.userId)))
     }
 
     for (const m of targets) {
       if (needQqLevel) {
         const level = qqLevelMap.get(m.userId)
-        if (level !== null && level !== undefined && level < Number(mc.qqLevel.minLevel)) {
+        // 与 runGroup 一致：未知（接口失败）时按 whenUnknown 决定是否算命中
+        if (level === null || level === undefined) {
+          if (mc.qqLevel.whenUnknown === 'trigger') {
+            hits.push({
+              groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
+              kind: 'qqLevel', kindName: 'QQ等级',
+              detail: `QQ 等级获取失败（按配置视为命中，要求 ≥ ${mc.qqLevel.minLevel}）`,
+              level: '', word: '', threshold: String(mc.qqLevel.minLevel),
+            })
+          }
+        } else if (level < Number(mc.qqLevel.minLevel)) {
           hits.push({
             groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
             kind: 'qqLevel', kindName: 'QQ等级',
@@ -476,8 +573,7 @@ export class MemberCheckService {
       }
       if (mc.card?.enabled && (!kind || kind === 'card') && mc.card.patterns?.length) {
         const excludeAdmin = mc.card.excludeAdmins !== false && (m.role === 'admin' || m.role === 'owner')
-        const excludeWl = mc.card.excludeWhitelist !== false
-          && !!(await this.svc.store.whitelistEntry(m.userId, gid, cfg.applyGlobalWhitelist === true))
+        const excludeWl = mc.card.excludeWhitelist !== false && whitelistIds.has(String(m.userId))
         if (!excludeAdmin && !excludeWl) {
           const display = m.card || m.nickname || ''
           const word = matchCard(display, mc.card)
@@ -491,13 +587,26 @@ export class MemberCheckService {
           }
         }
       }
-      if (mc.groupLevel?.enabled && (!kind || kind === 'groupLevel') && m.level >= 0 && m.level < Number(mc.groupLevel.minLevel)) {
-        hits.push({
-          groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
-          kind: 'groupLevel', kindName: '群等级',
-          detail: `群等级 ${m.level} 低于要求 ${mc.groupLevel.minLevel}`,
-          level: String(m.level), word: '', threshold: String(mc.groupLevel.minLevel),
-        })
+      // 群等级：与 runGroup 保持一致的三态处理 —— 未知按 whenUnknown 决定，
+      // 已知且低于阈值才算命中（normalizeMember 已把 0 归一为 -1=未知）
+      if (mc.groupLevel?.enabled && (!kind || kind === 'groupLevel')) {
+        if (m.level < 0) {
+          if (mc.groupLevel.whenUnknown === 'trigger') {
+            hits.push({
+              groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
+              kind: 'groupLevel', kindName: '群等级',
+              detail: `群等级获取失败（按配置视为命中，要求 ≥ ${mc.groupLevel.minLevel}）`,
+              level: '', word: '', threshold: String(mc.groupLevel.minLevel),
+            })
+          }
+        } else if (m.level < Number(mc.groupLevel.minLevel)) {
+          hits.push({
+            groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
+            kind: 'groupLevel', kindName: '群等级',
+            detail: `群等级 ${m.level} 低于要求 ${mc.groupLevel.minLevel}`,
+            level: String(m.level), word: '', threshold: String(mc.groupLevel.minLevel),
+          })
+        }
       }
     }
     return hits

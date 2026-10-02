@@ -52,6 +52,9 @@
 /* ---------- 外壳 ---------- */
 .qg-shell {
   display: flex;
+  /* 铺满父容器（k-layout 的内容区）。k-layout 本身已是定高布局，
+     这里不能用 100dvh 之类的视口高度兜底 —— 那会让 shell 高于父容器，
+     反而产生外层滚动条，把内容顶出可视区。 */
   height: 100%;
   min-height: 0;
   font-size: 14px;
@@ -60,6 +63,8 @@
   background: var(--qg-bg);
   box-sizing: border-box;
   overflow: hidden;
+  /* 移动端抽屉（.qg-nav）与遮罩（.qg-backdrop）以此为定位参照 */
+  position: relative;
 }
 .qg-shell *, .qg-shell *::before, .qg-shell *::after { box-sizing: border-box; }
 
@@ -122,6 +127,7 @@
   transition: background .15s, color .15s;
   white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 .qg-nav-item:hover { background: var(--qg-hover); color: var(--qg-text); }
 .qg-nav-item.active {
@@ -506,15 +512,113 @@
 .qg-body > * { animation: qg-fade .2s ease; }
 
 /* ---------- 响应式 ---------- */
+
+/* 中屏（平板横屏 / 小笔记本）：缩小内容内边距，避免横向拥挤 */
+@media (max-width: 1180px) {
+  .qg-body { padding: 16px 18px 56px; }
+  .qg-stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+}
+
 @media (max-width: 980px) {
   .qg-layout { grid-template-columns: 1fr; }
   .qg-grid.two, .qg-grid.three, .qg-grid.four { grid-template-columns: 1fr; }
 }
+
+/* ---------- 移动端：侧栏改为抽屉 ----------
+ * 关键修复：原实现把 .qg-nav 设为 position:absolute 覆盖在内容之上，
+ * 但主区域仍从 x=0 开始排版，且没有任何遮罩，导致展开的侧栏（214px）
+ * 直接压住正文左侧、无法关闭。现改为：
+ *   1) 侧栏脱离文档流成为「抽屉」，用 transform 平移进出，带过渡动画；
+ *   2) 展开时显示半透明遮罩，点击遮罩即关闭；
+ *   3) 主区域占满整个宽度（侧栏不再挤压内容）；
+ *   4) 首屏在移动端默认收起，避免一进来就遮挡内容。
+ */
+.qg-backdrop { display: none; }
+
 @media (max-width: 760px) {
-  .qg-nav { position: absolute; z-index: 20; height: 100%; box-shadow: var(--qg-shadow); }
-  .qg-nav:not(.collapsed) { width: 214px; flex-basis: 214px; }
-  .qg-body { padding: 14px 14px 50px; }
-  .qg-topbar { padding: 12px 14px; }
+  .qg-nav {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 60;
+    height: 100%;
+    width: min(78vw, 264px);
+    flex-basis: auto;
+    transform: translateX(-100%);
+    transition: transform .22s ease;
+    box-shadow: var(--qg-shadow);
+    /* 抽屉关闭时不应拦截点击 */
+    pointer-events: none;
+  }
+  /* 移动端的「展开」= 抽屉滑入；不再使用 60px 的收起态 */
+  .qg-nav:not(.collapsed) {
+    transform: translateX(0);
+    width: min(78vw, 264px);
+    flex-basis: auto;
+    pointer-events: auto;
+  }
+  /* 遮罩：仅展开时出现 */
+  .qg-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, .42);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .22s ease;
+  }
+  .qg-backdrop.show { opacity: 1; pointer-events: auto; }
+
+  /* 主区域占满宽度，内容不再被侧栏占位影响 */
+  .qg-main { width: 100%; }
+
+  .qg-topbar { padding: 10px 12px; gap: 8px; }
+  .qg-body { padding: 12px 12px 56px; }
+  .qg-body h2 { font-size: 16px; }
+  .qg-body h3 { font-size: 13.5px; }
+
+  /* 顶栏：小屏下隐藏描述文字与更新时间，优先保证标题与按钮 */
+  .qg-page-desc { display: none; }
+  .qg-updated { display: none; }
+
+  /* 表单行改为纵向堆叠 */
   .qg-row { flex-wrap: wrap; }
   .qg-row > span:first-child, .qg-row-label { width: 100%; flex-basis: 100%; }
+  .qg-row .qg-input, .qg-row select, .qg-row textarea { width: 100%; }
+
+  /* 表格：允许横向滚动而不是撑破布局 */
+  .qg-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .qg-table { min-width: 560px; }
+
+  /* 按钮组换行，避免溢出屏幕 */
+  .qg-add { flex-wrap: wrap; }
+  .qg-add .qg-input, .qg-add select { min-width: 0; flex: 1 1 140px; }
+
+  /* 卡片内边距收紧 */
+  .qg-card { padding: 12px; }
+  .qg-section-head { padding: 11px 12px; }
+  .qg-section-body { padding: 12px; }
+
+  /* 统计卡片：小屏下两列，避免单列过长 */
+  .qg-stats { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 9px; margin-bottom: 14px; }
+  .qg-stat .num { font-size: 23px; }
+  .qg-stat .icon { font-size: 21px; right: 10px; bottom: 8px; }
+
+  /* Toast 在小屏下占满宽度 */
+  .qg-toast-wrap { left: 12px; right: 12px; }
+  .qg-toast { max-width: none; }
+
+  /* 触控目标不小于 40px，便于手指点击 */
+  .qg-btn { min-height: 36px; }
+  .qg-nav-item { min-height: 40px; }
 }
+
+/* 超小屏：进一步压缩 */
+@media (max-width: 420px) {
+  .qg-body { padding: 10px 10px 52px; }
+  .qg-stats { grid-template-columns: 1fr 1fr; }
+  .qg-nav { width: min(86vw, 264px); }
+  .qg-nav:not(.collapsed) { width: min(86vw, 264px); }
+}
+

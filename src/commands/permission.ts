@@ -35,7 +35,7 @@ export function apply(ctx: Context, svc: Services) {
       try {
         const g = await svc.permission.createGroup(name.trim())
         return `已创建权限组「${g.name}」（优先级 ${g.priority}）。默认仅开启常规命令权限，`
-          + `「退群 / 审核员 / 举报 / 权限组」等高危权限需到「权限管理」页面显式勾选。`
+          + `「退群 / 审核员 / 权限组」等高危权限需到「权限管理」页面显式勾选。`
       } catch (e) {
         return (e as Error).message
       }

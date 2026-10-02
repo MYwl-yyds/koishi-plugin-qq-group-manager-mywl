@@ -1,6 +1,7 @@
 import { Context, Session } from 'koishi'
 import { OneBotFramework, OneBotMemberInfo } from '../types'
-import { idOf, mapConcurrent } from '../utils'
+import { idOf, mapConcurrent, sleep } from '../utils'
+import { ImageGuardService } from './image-guard'
 
 function normalizeError(e: any): Error {
   if (e instanceof Error) return e
@@ -132,13 +133,18 @@ export class OneBotService {
   private normalizeMember(raw: any): MemberInfo {
     const userId = idOf(raw?.user_id ?? raw?.userId ?? raw?.uin)
     const levelRaw = raw?.level ?? raw?.member_level ?? raw?.memberLevel
-    const level = levelRaw === undefined || levelRaw === null || levelRaw === '' ? -1 : Number(levelRaw)
+    const num = levelRaw === undefined || levelRaw === null || levelRaw === ''
+      ? NaN
+      : Number(levelRaw)
+    // 群等级为 0 基本可判定为协议端返回的默认值 / 数据异常（真实成员至少 1 级），
+    // 归一到 -1 表示「未知」，交由上层按 whenUnknown 策略处理，避免整群被误判。
+    const level = Number.isFinite(num) && num >= 1 ? num : -1
     return {
       userId,
       nickname: String(raw?.nickname ?? raw?.nick_name ?? '').trim(),
       card: String(raw?.card ?? '').trim(),
       role: String(raw?.role ?? 'member'),
-      level: Number.isFinite(level) ? level : -1,
+      level,
       lastSentTime: Number(raw?.last_sent_time ?? raw?.lastSentTime ?? 0) || 0,
       joinTime: Number(raw?.join_time ?? raw?.joinTime ?? 0) || 0,
     }
@@ -303,10 +309,30 @@ export class OneBotService {
     }
   }
 
+  // 获取图片的真实下载地址（OneBot get_image）。
+  // 部分协议端消息段里的 file 字段是本地路径或文件名而非 http 地址，
+  // 此时需要用 file 调 get_image 换取可下载的 url；已经是 http 的则原样返回。
+  async resolveImageUrl(session: Session, file: string): Promise<string> {
+    const f = String(file || '').trim()
+    if (!f) return ''
+    if (/^https?:\/\//i.test(f)) return f
+    try {
+      const res = await this.invoke(session, 'get_image',
+        { file: f },
+        [f])
+      const data = this.unwrap(res) ?? {}
+      const url = data.url ?? data.file ?? data.path
+      return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : ''
+    } catch (e) {
+      this.log.debug(`获取图片地址失败：${normalizeError(e).message}`)
+      return ''
+    }
+  }
+
   // 获取消息详情（OneBot get_msg），用于解析被引用消息的发送者与正文。
   // 标准 OneBot v11 的 reply 段通常只含 message_id，不含发送者，
   // 因此需要调用 get_msg 获取发送者 QQ 与原始内容。
-  async getMsg(session: Session, messageId: string): Promise<{ userId?: string, nickname?: string, content?: string } | null> {
+  async getMsg(session: Session, messageId: string): Promise<{ userId?: string, nickname?: string, content?: string, images?: string[] } | null> {
     try {
       const res = await this.invoke(session, 'get_msg',
         { message_id: messageId },
@@ -316,20 +342,37 @@ export class OneBotService {
       // 不同框架字段略有差异：user_id 可能在顶层，也可能在 sender 内
       const uid = data.user_id ?? sender.user_id
       let content = ''
-      if (data.raw_message != null && String(data.raw_message).trim()) {
-        content = String(data.raw_message)
-      } else if (Array.isArray(data.message)) {
+      let images: string[] = []
+      if (Array.isArray(data.message)) {
+        // LLBot / NapCat 的 get_msg 返回 message 为段数组，这里同时取出文本与图片
         content = data.message
           .filter((m: any) => m?.type === 'text')
           .map((m: any) => String(m?.data?.text ?? ''))
           .join('')
-      } else if (data.text != null) {
+        images = ImageGuardService.imageUrlsFromSegments(data.message)
+        // 兜底：段里只有 file 文件名/本地路径时（无 http url），用 get_image 换取下载地址
+        if (images.length === 0) {
+          for (const seg of data.message) {
+            const t = seg?.type
+            if (t !== 'image' && t !== 'face' && t !== 'mface') continue
+            const f = seg?.data?.file ?? seg?.data?.url ?? seg?.attrs?.file
+            if (typeof f !== 'string' || !f) continue
+            const real = await this.resolveImageUrl(session, f)
+            if (real && !images.includes(real)) images.push(real)
+          }
+        }
+      }
+      // raw_message 优先级最高（已是纯文本），但图片仍需从段数组取
+      if (data.raw_message != null && String(data.raw_message).trim()) {
+        content = String(data.raw_message)
+      } else if (!content && data.text != null) {
         content = String(data.text)
       }
       return {
         userId: uid !== undefined && uid !== null ? String(uid) : '',
         nickname: sender.nickname != null ? String(sender.nickname) : (sender.card != null ? String(sender.card) : ''),
         content,
+        images,
       }
     } catch (e) {
       this.log.warn('获取消息详情失败', normalizeError(e).message)
@@ -338,29 +381,62 @@ export class OneBotService {
   }
 
   // 获取陌生人信息（用于 QQ 等级检查与昵称），失败降级返回 null
-  // level 字段在 LLBot / NapCat 上为 QQ 账号等级（1~256）
-  async getStrangerInfo(session: Session, userId: string, ttlMs = 5 * 60 * 1000): Promise<{ nickname?: string, level?: number } | null> {
+  // level 字段在 LLBot / NapCat 上为 QQ 账号等级（1~256，新号至少为 1）。
+  //
+  // 大群场景下本接口是最容易出问题的一环，因此做了三层防护：
+  // 1) 长缓存：同一成员在 ttlMs 内只真正请求一次（默认 6 小时，由调用方传入）；
+  // 2) 退避重试：限流/超时导致的失败会重试一次（带延迟），而不是直接放弃；
+  // 3) 有效性校验：level 缺失或为 0 一律视为「未取到」（0 级在真实 QQ 账号中不存在，
+  //    出现 0 基本意味着协议端返回了默认值），返回 null 交由上层按 whenUnknown 处理。
+  async getStrangerInfo(
+    session: Session,
+    userId: string,
+    ttlMs = 5 * 60 * 1000,
+    retry = 1,
+  ): Promise<{ nickname?: string, level?: number } | null> {
     const uid = idOf(userId)
     if (!uid) return null
     const hit = this.strangerCache.get(uid)
     if (hit && Date.now() - hit.at < ttlMs) return hit.data
+
     let data: { nickname?: string, level?: number } | null = null
-    try {
-      const res = await this.invoke(session, 'get_stranger_info',
-        { user_id: uid, no_cache: false },
-        [uid, false])
-      const info = this.unwrap(res) ?? {}
-      const levelRaw = info.level ?? info.qq_level ?? info.qqLevel
-      data = {
-        nickname: info.nickname ? String(info.nickname) : '',
-        level: levelRaw === undefined || levelRaw === null || levelRaw === '' ? -1 : Number(levelRaw),
+    const attempts = Math.max(1, retry + 1)
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const res = await this.invoke(session, 'get_stranger_info',
+          { user_id: uid, no_cache: false },
+          [uid, false])
+        const info = this.unwrap(res) ?? {}
+        const levelRaw = info.level ?? info.qq_level ?? info.qqLevel
+        const num = levelRaw === undefined || levelRaw === null || levelRaw === ''
+          ? NaN
+          : Number(levelRaw)
+        // 有效等级：有限数字且 >= 1（0 视为协议端默认值 / 接口异常）
+        const valid = Number.isFinite(num) && num >= 1
+        data = {
+          nickname: info.nickname ? String(info.nickname) : '',
+          level: valid ? num : -1,
+        }
+        // 取到有效等级，或虽无等级但接口本身是通的 —— 都算成功，不再重试
+        if (valid || !Number.isFinite(num)) break
+        // 明确拿到了 0：很可能是限流后的默认返回，重试一次
+        if (i < attempts - 1) await sleep(200 * (i + 1))
+        continue
+      } catch (e) {
+        const msg = normalizeError(e).message
+        // 最后一次仍失败才记录告警，避免刷屏
+        if (i >= attempts - 1) {
+          this.log.warn('获取陌生人信息失败（降级跳过）', msg)
+        } else {
+          await sleep(200 * (i + 1))
+        }
+        data = null
       }
-      if (!Number.isFinite(data.level as number)) data.level = -1
-    } catch (e) {
-      this.log.warn('获取陌生人信息失败（降级跳过）', normalizeError(e).message)
-      data = null
     }
-    this.cacheSet(this.strangerCache, uid, data)
+    // 只有拿到有效结果才写缓存，避免把失败结果缓存数小时
+    if (data && typeof data.level === 'number' && data.level >= 1) {
+      this.cacheSet(this.strangerCache, uid, data, 5000)
+    }
     return data
   }
 

@@ -39,7 +39,7 @@
 
       <Section :title="`已配置群聊（${filtered.length}）`" icon="💬" :open="true">
         <template #actions>
-          <input class="qg-input" style="width:170px" v-model="keyword" placeholder="搜索群号 / 名称" />
+          <input class="qg-input qg-search" v-model="keyword" placeholder="搜索群号 / 名称" />
         </template>
 
         <EmptyState
@@ -94,7 +94,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useScope, mutate, invalidateScope, splitList } from '../useData'
+import { useScope, mutate, invalidateScope, applyMutated, splitList } from '../useData'
 import { gotoPage, takePageParams } from '../nav'
 import { toast } from '../toast'
 import Section from '../components/Section.vue'
@@ -126,8 +126,11 @@ async function addManual() {
   if (res?.ok) {
     toast.success(`已添加 ${ids.length} 个群聊`)
     newGroupIds.value = ''
-    invalidateScope('groups')
-    refresh(undefined, true)
+    // 后端已随响应返回重建后的群列表，直接采用，省掉一次额外请求
+    if (!applyMutated(res, 'groups', data)) {
+      invalidateScope('groups')
+      refresh(undefined, true)
+    }
   } else {
     toast.error(res?.error || '添加失败')
   }
@@ -137,8 +140,10 @@ async function addOne(groupId: string) {
   const res = await mutate('group.add', { groupIds: [groupId] })
   if (res?.ok) {
     toast.success(`已添加群 ${groupId}`)
-    invalidateScope('groups')
-    refresh(undefined, true)
+    if (!applyMutated(res, 'groups', data)) {
+      invalidateScope('groups')
+      refresh(undefined, true)
+    }
   } else {
     toast.error(res?.error || '添加失败')
   }
@@ -157,6 +162,12 @@ onMounted(() => {
 
 <style scoped>
 .qg-group-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); gap: 12px; }
+/* 搜索框：桌面固定宽度，小屏自适应撑满，避免固定 170px 在窄屏溢出 */
+.qg-search { width: 170px; }
+@media (max-width: 760px) {
+  .qg-search { width: 100%; }
+  .qg-group-cards { grid-template-columns: 1fr; }
+}
 .qg-group-card {
   border: 1px solid var(--qg-border);
   border-radius: 11px;

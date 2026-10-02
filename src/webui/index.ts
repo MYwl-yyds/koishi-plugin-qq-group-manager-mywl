@@ -428,7 +428,11 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
         break
       }
       case 'setGroup': {
-        scope = 'groupDetail'
+        // 调用方可通过 data.scope 指定「希望拿到哪一份重建后的数据」：
+        // - groupDetail（默认）：群配置详情页
+        // - memberCheck：群员检查页（它另有预览命中成员等数据，不能只靠 groupDetail）
+        const want = String(data.scope || 'groupDetail')
+        scope = (want === 'memberCheck') ? 'memberCheck' : 'groupDetail'
         await svc.settings.setGroup(data.groupId, data.patch)
         await log.operation('WebUI修改群配置', { groupId: data.groupId })
         break
@@ -657,7 +661,12 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
         break
       }
       case 'memberCheck.scanAll': {
-        scope = 'memberCheck'
+        // 调用方通过 data.scope 指定希望刷新哪一份数据：
+        // - settings（默认）：群员检查页的「最近一次执行」来自 settings 域
+        // - overview：总览页的运行状态卡片
+        // - memberCheck：需要同步该群的预览命中列表时
+        const want = String(data.scope || 'settings')
+        scope = want === 'overview' ? 'overview' : (want === 'memberCheck' ? 'memberCheck' : 'settings')
         const results = await svc.memberCheck.scanAll()
         const total = results.reduce((a: number, r: any) => a + r.hits, 0)
         await log.operation('WebUI全量群员检查', { result: `共 ${results.length} 个群，命中 ${total}` })
@@ -665,11 +674,13 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
       }
 
       // 禁发指定图片（样本库管理 + 比对测试）
-      // groupId 为空 = 全局样本；非空 = 该群专属样本
+      // groupId 为空 = 全局样本；非空 = 该群专属样本。
+      // 带 groupId 时把受影响域设为 groupDetail，这样群配置页能一次性拿到本群样本列表，
+      // 免去「保存后再发一次请求」的额外往返。
       case 'image.sample.add': {
-        scope = 'settings'
         const url = String(data.url || '').trim()
         const gid = String(data.groupId || '')
+        scope = gid ? 'groupDetail' : 'settings'
         if (!/^https?:\/\//i.test(url)) return { ok: false, error: '请填写以 http(s):// 开头的图片地址' }
         const res = await svc.imageGuard.addSample(url, String(data.label || ''), 'url', gid)
         if (!res.ok) return { ok: false, error: res.message }
@@ -680,10 +691,10 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
         break
       }
       case 'image.sample.addBase64': {
-        scope = 'settings'
         // WebUI 上传的图片以 data URL 传入，直接解码为二进制入库
         const raw = String(data.dataUrl || '')
         const gid = String(data.groupId || '')
+        scope = gid ? 'groupDetail' : 'settings'
         const m = raw.match(/^data:([^;]+);base64,(.+)$/)
         if (!m) return { ok: false, error: '图片数据格式不正确' }
         let buf: Uint8Array
@@ -702,14 +713,15 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
         break
       }
       case 'image.sample.remove': {
-        scope = 'settings'
+        const gidArg = data.groupId === undefined ? undefined : String(data.groupId)
+        scope = gidArg ? 'groupDetail' : 'settings'
         const id = Number(data.id)
         const rows = await svc.store.bannedImageList().catch(() => [])
         const target = Array.isArray(rows) ? rows.find((r: any) => Number(r.id) === id) : undefined
         if (!target) return { ok: false, error: '样本不存在或已被删除' }
         // 群配置页只能删本群自己的样本；全局样本必须在「违禁词与链接」页删除，
         // 避免在群页面误删对所有群生效的样本（页面上全局样本是只读展示的）
-        if (data.groupId !== undefined && String(target.groupId || '') !== String(data.groupId || '')) {
+        if (gidArg !== undefined && String(target.groupId || '') !== gidArg) {
           return { ok: false, error: '全局样本不可在群配置页删除，请到「违禁词与链接」页面操作' }
         }
         const ok = await svc.store.bannedImageRemove(id)
@@ -719,9 +731,9 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
         break
       }
       case 'image.sample.clear': {
-        scope = 'settings'
         // 传了 groupId 只清该群的专属样本，不动全局样本库
         const gid = data.groupId === undefined || data.groupId === '' ? undefined : String(data.groupId)
+        scope = gid ? 'groupDetail' : 'settings'
         await svc.store.bannedImageClear(gid)
         svc.imageGuard.invalidate()
         await log.operation(gid ? `WebUI清空群 ${gid} 的违规图样本` : 'WebUI清空全局违规图样本库', { groupId: gid || '' })
@@ -821,7 +833,14 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
       default:
         return { ok: false, error: `未知操作 ${action}` }
     }
-    return { ok: true, scope, data: await buildScope(svc, scope, data?.params || {}) }
+    // 重建受影响的数据域并连同数据一起返回，前端可直接采用，避免再发一次请求。
+    // 带参数的域（groupDetail / memberCheck）需要 groupId：优先取显式 params，
+    // 否则回退到 data.groupId（setGroup 与群级样本操作都是直接带 groupId 的）。
+    let params = data?.params || {}
+    if ((scope === 'groupDetail' || scope === 'memberCheck') && !params.groupId && data?.groupId) {
+      params = { ...params, groupId: String(data.groupId) }
+    }
+    return { ok: true, scope, data: await buildScope(svc, scope, params) }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }

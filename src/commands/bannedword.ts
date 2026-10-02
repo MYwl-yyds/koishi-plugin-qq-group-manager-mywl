@@ -1,6 +1,6 @@
 import { Context, Session } from 'koishi'
 import { Services } from '../types'
-import { idOf } from '../utils'
+import { idOf, quotedMessageId } from '../utils'
 import { ImageGuardService } from '../services/image-guard'
 
 function guild(session: Session): string {
@@ -49,9 +49,9 @@ export function apply(ctx: Context, svc: Services) {
   ctx.command('设为违规图 [label:text]', '引用一张图片消息，把它加入违规图片样本库')
     .action(async ({ session }: any, label) => {
       if (!await svc.permission.check(session, '违规图管理')) return '你没有权限使用此命令'
-      const urls = collectQuotedImageUrls(session)
+      const { urls, reason } = await collectQuotedImageUrls(svc, session)
       if (urls.length === 0) {
-        return '请先「引用回复」一条包含图片的消息，再发送本命令（支持 PNG / 基线 JPEG）'
+        return `${reason || '未找到图片'}。用法：引用回复一条含图片的消息后发送本命令（支持 PNG / 基线 JPEG）`
       }
       const note = String(label || '').trim()
       const done: string[] = []
@@ -102,25 +102,48 @@ export function apply(ctx: Context, svc: Services) {
     })
 }
 
-// 收集被引用消息中的图片地址（优先取引用快照，其次取当前消息自身的图片）
-function collectQuotedImageUrls(session: Session): string[] {
+// 收集被引用消息中的图片地址。
+// OneBot v11 的 reply/quote 段通常**只带 message_id**，不含原始消息内容，
+// 因此必须调用 get_msg 取回原消息再解析其中的图片段；
+// 少数适配器会在 quote 段内附带快照，这里作为快速路径优先尝试。
+async function collectQuotedImageUrls(svc: Services, session: Session): Promise<{ urls: string[], reason: string }> {
   const urls: string[] = []
   const push = (v: any) => {
     if (typeof v === 'string' && /^https?:\/\//i.test(v) && !urls.includes(v)) urls.push(v)
   }
+
+  // 1) 引用段内直接带快照的情况（部分适配器提供）
   for (const el of (session as any).elements || []) {
     if (el.type !== 'quote' && el.type !== 'reply') continue
-    const snap = el.attrs?.quote ?? el.attrs?.data ?? el.attrs
-    const inner = snap?.elements ?? snap?.message ?? []
-    if (Array.isArray(inner)) {
-      for (const e of inner) {
-        if (e?.type === 'image') push(e.attrs?.url || e.attrs?.src || e.attrs?.file)
-      }
-    }
+    const snap = el.attrs?.quote ?? el.attrs?.data
+    if (!snap) continue
+    const inner = snap.elements ?? snap.message ?? (Array.isArray(snap) ? snap : [])
+    for (const u of ImageGuardService.imageUrlsFromSegments(inner)) push(u)
   }
-  // 若引用快照不带图片元素，退而取当前消息自身的图片
-  if (urls.length === 0) {
-    for (const url of ImageGuardService.imageUrls(session)) push(url)
+  if (urls.length > 0) return { urls, reason: '' }
+
+  // 2) 标准路径：用被引用消息的 message_id 调 get_msg 取回原消息
+  const quotedId = quotedMessageId(session)
+  if (quotedId) {
+    const msg = await svc.onebot.getMsg(session, quotedId)
+    for (const u of msg?.images || []) push(u)
+    if (urls.length > 0) return { urls, reason: '' }
+    // 取回了消息但没有图片 —— 与被引用消息查不到要区分开，便于给出准确提示
+    if (msg) return { urls, reason: '被引用的消息里没有图片' }
+    return { urls, reason: '无法读取被引用的消息（协议端 get_msg 接口不可用）' }
   }
-  return urls
+
+  // 3) 兜底：当前消息自身带的图片（例如直接把图片和命令一起发）
+  for (const u of ImageGuardService.imageUrls(session)) push(u)
+  if (urls.length > 0) return { urls, reason: '' }
+  // 会话里的图片段可能只带 file 文件名/本地路径，用 get_image 换取真实下载地址
+  for (const el of ((session as any).elements || []) as any[]) {
+    if (el?.type !== 'image' && el?.type !== 'face' && el?.type !== 'mface') continue
+    const f = el?.attrs?.file ?? el?.attrs?.url
+    if (typeof f !== 'string' || !f) continue
+    push(await svc.onebot.resolveImageUrl(session, f))
+  }
+  if (urls.length > 0) return { urls, reason: '' }
+
+  return { urls, reason: '请「引用回复」一条包含图片的消息，再发送本命令' }
 }

@@ -71,14 +71,31 @@ export function parseLink(input: string): LinkHit | null {
 }
 
 // 从一段文本中提取全部链接
-export function extractLinks(text: string, detectBare = true): LinkHit[] {
+//
+// ignoreCdnHosts：跳过 QQ 自家的图片 / 表情 / 文件 CDN 域名。
+// 这些地址只应出现在「图片消息」里，由禁发图片功能处理；
+// 万一它们以文本形式残留在消息中，也不应被当成「用户发送的链接」而处罚。
+// 注意：只列图片/媒体类 CDN，不含 qq.com 主域 —— 正常分享腾讯网页链接不应被放过。
+const QQ_CDN_HOSTS = [
+  'qpic.cn', 'gtimg.cn', 'qlogo.cn',
+  'qqusercontent.com', 'multimedia.nt.qq.com.cn',
+]
+
+function isQqCdnHost(host: string): boolean {
+  const h = String(host || '').toLowerCase()
+  return QQ_CDN_HOSTS.some((d) => h === d || h.endsWith('.' + d))
+}
+
+export function extractLinks(text: string, detectBare = true, ignoreCdnHosts = true): LinkHit[] {
   const src = String(text || '')
   if (!src) return []
   const found = new Map<string, LinkHit>()
 
   const collect = (raw: string) => {
     const hit = parseLink(raw)
-    if (hit && !found.has(hit.url)) found.set(hit.url, hit)
+    if (!hit || found.has(hit.url)) return
+    if (ignoreCdnHosts && isQqCdnHost(hit.host)) return
+    found.set(hit.url, hit)
   }
 
   for (const m of src.match(PATTERN_PROTOCOL) || []) collect(m)

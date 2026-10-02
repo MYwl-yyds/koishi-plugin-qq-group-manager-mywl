@@ -166,7 +166,12 @@ export const DEFAULT_CONFIG: Config = {
     enabled: false,
     intervalMinutes: 30,
     timeoutSeconds: 60,
-    batchSize: 4,
+    // 并发默认 2：大群下更高的并发容易触发协议端限流，反而导致等级读取失败
+    batchSize: 2,
+    // QQ 等级缓存 6 小时，是避免大群限流最有效的手段
+    levelCacheHours: 6,
+    // 失败率超过 30% 判定为限流，中止本次检查且不处罚
+    maxFailRatio: 30,
     cooldownHours: 24,
     activeWithinDays: 0,
     qqLevel: {

@@ -32,6 +32,8 @@ export function createServices(ctx: Context, config: Config): Services {
   services.permission = new PermissionService(ctx, store, async () => (await services.settings.getGlobal()).superUsers)
   services.memberCheck = new MemberCheckService(ctx, services)
   services.imageGuard = new ImageGuardService(ctx, store)
+  // 让图片检测在「消息段只带 file 文件名」时也能通过 get_image 取到真实地址
+  services.imageGuard.attachOnebot(onebot)
   services.exporter = new ExportService(ctx, store, settings, () => services.imageGuard?.invalidate?.())
   return services
 }

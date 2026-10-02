@@ -188,7 +188,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useScope, mutate, relativeTime } from '../useData'
+import { useScope, mutate, applyMutated, relativeTime } from '../useData'
 import { gotoPage } from '../nav'
 import { toast } from '../toast'
 import Section from '../components/Section.vue'
@@ -300,7 +300,8 @@ async function review(r: any, approve: boolean) {
   busyFlag.value = ''
   if (res?.ok) {
     toast.success(approve ? '已通过该入群申请' : '已拒绝该入群申请')
-    refresh(undefined, true)
+    // 响应里已带回重建后的 overview 数据，直接采用
+    if (!applyMutated(res, 'overview', data)) refresh(undefined, true)
   } else {
     toast.error(res?.error || '操作失败')
   }
@@ -308,11 +309,11 @@ async function review(r: any, approve: boolean) {
 
 async function scanAll() {
   scanning.value = true
-  const res = await mutate('memberCheck.scanAll', {})
+  const res = await mutate('memberCheck.scanAll', { scope: 'overview' })
   scanning.value = false
   if (res?.ok) {
     toast.success('群员检查已完成')
-    refresh(undefined, true)
+    if (!applyMutated(res, 'overview', data)) refresh(undefined, true)
   } else {
     toast.error(res?.error || '检查失败')
   }

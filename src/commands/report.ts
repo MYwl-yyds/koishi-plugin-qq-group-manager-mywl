@@ -11,8 +11,8 @@ export function apply(ctx: Context, svc: Services) {
   ctx.command('举报', '举报一条被引用的消息（需先引用/回复目标消息）')
     .alias('投诉')
     .action(async ({ session }: any) => {
-      // 举报会触发 AI 判定并执行撤回/禁言/踢出，必须校验权限（默认拒绝）
-      if (!await svc.permission.check(session, '举报')) return '你没有权限使用此命令'
+      // 举报对所有群成员开放，不校验权限组（这是设计如此：普通成员才有举报需求）。
+      // 滥用防护依赖下面的频率限制与白名单豁免。
       const cfg = await svc.settings.getGroup(guild(session))
       if (cfg.enableGroupManagement === false) return '本群未启用群管功能'
       if (!cfg.report.enabled) return '举报功能已被禁用'
