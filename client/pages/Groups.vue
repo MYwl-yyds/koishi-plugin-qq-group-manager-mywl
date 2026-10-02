@@ -153,9 +153,11 @@ function openDetail(groupId: string) {
   gotoPage('group-detail', { groupId })
 }
 
-// 从其它页面带参跳转过来时自动打开对应群
+// 从其它页面带参跳转过来时自动打开对应群。
+// 注意：必须限定「发给 groups 页」的参数，否则会把发给 group-detail 的群号
+// 提前取走并清空，导致群配置详情页拿不到群号（一直显示「暂无数据」）。
 onMounted(() => {
-  const params = takePageParams()
+  const params = takePageParams<{ groupId?: string }>('groups')
   if (params?.groupId) gotoPage('group-detail', params)
 })
 </script>

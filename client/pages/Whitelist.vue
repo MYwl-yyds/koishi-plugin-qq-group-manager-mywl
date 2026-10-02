@@ -175,7 +175,8 @@ async function toggleFlag(b: any, key: string, e: Event) {
 }
 
 onMounted(() => {
-  const params = takePageParams()
+  // 只取发给本页的参数，避免误消费其它页面的群号
+  const params = takePageParams<{ groupId?: string }>('whitelist')
   if (params?.groupId) currentScope.value = String(params.groupId)
 })
 </script>

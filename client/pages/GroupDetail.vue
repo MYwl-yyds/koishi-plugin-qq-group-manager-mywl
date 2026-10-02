@@ -1,42 +1,58 @@
 <template>
   <div>
-    <Skeleton v-if="!data && loading" :rows="6" />
-
-    <template v-else-if="data">
-      <!-- 群选择 -->
-      <Section title="选择群聊" sub="所有配置仅对该群生效，留空项沿用全局设置" icon="💬" :open="true">
-        <div class="qg-grid two" style="align-items:start">
-          <div>
-            <label class="qg-field">
-              <label>群号</label>
-              <select class="qg-select" v-model="groupId" @change="onGroupChange">
-                <option value="">— 请选择 —</option>
-                <option v-for="g in groupOptions" :key="g.groupId" :value="g.groupId">
-                  {{ g.name ? `${g.name}（${g.groupId}）` : g.groupId }}
-                </option>
-              </select>
-            </label>
-            <div class="qg-add">
-              <input class="qg-input" v-model="manualGroupId" placeholder="或输入未在列表中的群号" />
-              <button class="qg-btn" @click="useManualGroup">切换</button>
-            </div>
-          </div>
-          <div v-if="groupId">
-            <span class="qg-hint tight">
-              该群{{ data.exists ? '已有独立配置覆盖' : '当前使用全局配置（尚未产生任何覆盖）' }}。
-              「重置为全局」会清空本群全部覆盖项；「删除配置」会让本群从列表中移除。
-            </span>
-            <div class="qg-actions">
-              <button class="qg-btn sm" @click="resetGroup">重置为全局</button>
-              <button class="qg-btn sm danger" @click="removeGroup">删除配置</button>
-            </div>
+    <!-- 群选择区始终渲染：即使详情数据还没到（或加载失败），
+         用户也必须能看到/切换群号。之前它被放在 v-else-if="data" 里，
+         一旦数据没取到就整页空白，只剩「暂无数据」，极难排查。 -->
+    <Section title="选择群聊" sub="所有配置仅对该群生效，留空项沿用全局设置" icon="💬" :open="true">
+      <div class="qg-grid two" style="align-items:start">
+        <div>
+          <label class="qg-field">
+            <label>群号</label>
+            <select class="qg-select" v-model="groupId" @change="onGroupChange">
+              <option value="">— 请选择 —</option>
+              <option v-for="g in groupOptions" :key="g.groupId" :value="g.groupId">
+                {{ g.name ? `${g.name}（${g.groupId}）` : g.groupId }}
+              </option>
+            </select>
+          </label>
+          <div class="qg-add">
+            <input class="qg-input" v-model="manualGroupId" placeholder="或输入未在列表中的群号" />
+            <button class="qg-btn" @click="useManualGroup">切换</button>
           </div>
         </div>
-      </Section>
+        <div v-if="groupId">
+          <span class="qg-hint tight">
+            该群{{ data?.exists ? '已有独立配置覆盖' : '当前使用全局配置（尚未产生任何覆盖）' }}。
+            「重置为全局」会清空本群全部覆盖项；「删除配置」会让本群从列表中移除。
+          </span>
+          <div class="qg-actions">
+            <button class="qg-btn sm" @click="resetGroup">重置为全局</button>
+            <button class="qg-btn sm danger" @click="removeGroup">删除配置</button>
+          </div>
+        </div>
+      </div>
+    </Section>
 
-      <EmptyState v-if="!groupId" text="请先选择或输入一个群号" sub="选择后即可配置该群的欢迎语、入群审核、违禁词、群员检查等" icon="👈" />
+    <Skeleton v-if="!data && loading" :rows="6" />
 
-      <template v-else>
+    <!-- 已选群但数据尚未就绪/加载失败：给出明确原因与重试入口 -->
+    <EmptyState
+      v-else-if="!data && groupId"
+      :text="error || '未能加载该群配置'"
+      :sub="error ? '可点击下方按钮重试' : '正在获取数据…'"
+      icon="⚠️"
+    >
+      <button class="qg-btn sm" @click="refresh(undefined, true)">重新加载</button>
+    </EmptyState>
+
+    <EmptyState
+      v-else-if="!data"
+      text="请先选择或输入一个群号"
+      sub="选择后即可配置该群的欢迎语、入群审核、违禁词、群员检查等"
+      icon="👈"
+    />
+
+    <template v-else>
         <!-- 基础开关 -->
         <Section title="基础功能" icon="🎛️" :open="true">
           <div class="qg-grid three">
@@ -412,10 +428,7 @@
           <button class="qg-btn primary" @click="save">保存本群配置</button>
           <span class="qg-muted">群 {{ groupId }}</span>
         </div>
-      </template>
     </template>
-
-    <EmptyState v-else :text="error || '暂无数据'" icon="⚠️" />
   </div>
 </template>
 
@@ -884,7 +897,8 @@ async function removeGroupSample(s: any) {
 }
 
 onMounted(() => {
-  const params = takePageParams()
+  // 只取「发给本页」的参数，避免取到别的页面遗留的群号
+  const params = takePageParams<{ groupId?: string }>('group-detail')
   if (params?.groupId) groupId.value = String(params.groupId)
   if (groupId.value) refresh(undefined, true)
 })

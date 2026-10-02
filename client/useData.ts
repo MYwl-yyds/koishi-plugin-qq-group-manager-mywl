@@ -75,24 +75,25 @@ export function useScope<T = any>(scope: string, options: {
   let disposed = false
 
   async function refresh(extraParams?: any, force = false) {
+    // 组件已卸载：直接拒绝，不再发起请求（避免无意义的后台请求）
     if (disposed) return null
     const params = { ...(options.params?.() || {}), ...(extraParams || {}) }
     // 已有数据时视为「后台刷新」：页面继续展示旧内容，只标记更新中，避免骨架屏闪烁
-    loading.value = !data.value
+    loading.value = true
     if (data.value) stale.value = true
     error.value = ''
     try {
       const result = await fetchScope(scope, params, force)
-      if (!disposed) {
-        data.value = result
-        stale.value = false
-        lastLoadedAt.value = Date.now()
-      }
+      // 卸载后就不要再写入 ref 了（Vue 会警告），但要保证 loading 归位
+      if (disposed) return result
+      data.value = result
+      stale.value = false
+      lastLoadedAt.value = Date.now()
       return result
     } catch (e) {
       // 有缓存时降级展示旧数据，只提示错误
       if (!disposed) {
-        error.value = (e as Error).message
+        error.value = (e as Error).message || '加载失败'
         stale.value = !!data.value
       }
       return null
