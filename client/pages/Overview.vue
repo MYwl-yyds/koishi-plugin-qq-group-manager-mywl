@@ -36,13 +36,8 @@
         </div>
       </div>
 
-      <!-- 群员检查状态 -->
+      <!-- 群员检查状态（只读概览：该功能仅由定时任务自动执行，不提供手动触发） -->
       <Section title="群员检查" :sub="memberCheckSummary" icon="🔎" :open="true">
-        <template #actions>
-          <button class="qg-btn sm" :disabled="scanning" @click="scanAll">
-            {{ scanning ? '检查中…' : '立即全量检查' }}
-          </button>
-        </template>
         <div class="qg-grid three">
           <div class="qg-card flat" :class="{ 'qg-off': !data.memberCheck.kinds.qqLevel }">
             <h4>QQ 账号等级</h4>
@@ -66,7 +61,8 @@
         <p class="qg-hint tight">
           已启用群员检查的群：{{ data.memberCheck.groupCount ?? 0 }} 个 ·
           上次执行：{{ data.memberCheck.lastRunAt ? relativeTime(data.memberCheck.lastRunAt) : '尚未执行' }}。
-          群员检查为群级配置，各群独立设置间隔与规则，详细配置请到「群员检查」页面。
+          群员检查为群级配置，各群独立设置间隔与规则，由定时任务自动执行；
+          详细配置请到「群聊管控 → 群配置详情」的「群员检查」分区。
         </p>
         <div v-if="data.memberCheck.lastResults?.length" class="qg-table-wrap" style="margin-top:10px">
           <table class="qg-table">
@@ -197,7 +193,6 @@ import Skeleton from '../components/Skeleton.vue'
 
 const trendDays = ref(7)
 const busyFlag = ref('')
-const scanning = ref(false)
 
 const { data, loading, error, refresh } = useScope<any>('overview', {
   params: () => ({ days: trendDays.value }),
@@ -304,18 +299,6 @@ async function review(r: any, approve: boolean) {
     if (!applyMutated(res, 'overview', data)) refresh(undefined, true)
   } else {
     toast.error(res?.error || '操作失败')
-  }
-}
-
-async function scanAll() {
-  scanning.value = true
-  const res = await mutate('memberCheck.scanAll', { scope: 'overview' })
-  scanning.value = false
-  if (res?.ok) {
-    toast.success('群员检查已完成')
-    if (!applyMutated(res, 'overview', data)) refresh(undefined, true)
-  } else {
-    toast.error(res?.error || '检查失败')
   }
 }
 

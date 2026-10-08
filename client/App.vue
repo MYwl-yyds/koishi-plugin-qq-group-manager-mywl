@@ -86,7 +86,6 @@ import Overview from './pages/Overview.vue'
 import Groups from './pages/Groups.vue'
 import GroupDetail from './pages/GroupDetail.vue'
 import BannedWords from './pages/BannedWords.vue'
-import MemberCheck from './pages/MemberCheck.vue'
 import Blacklist from './pages/Blacklist.vue'
 import Whitelist from './pages/Whitelist.vue'
 import Logs from './pages/Logs.vue'
@@ -99,7 +98,7 @@ import { currentPage, gotoPage } from './nav'
 
 // 页面按功能域重新归类：
 //  1. 总览        —— 运行概况、待办、趋势
-//  2. 群聊管控    —— 群列表 / 群配置 / 违禁词与链接 / 群员检查
+//  2. 群聊管控    —— 群列表 / 群配置 / 违禁词与链接
 //  3. 名单中心    —— 黑名单 / 白名单
 //  4. 记录中心    —— 操作与审核日志
 //  5. 系统        —— 权限组 / 全局设置
@@ -116,7 +115,6 @@ const navGroups = [
       { key: 'groups', label: '群聊列表', icon: '💬', desc: '选择要配置的群聊，查看各功能开关状态', component: Groups },
       { key: 'group-detail', label: '群配置详情', icon: '⚙️', desc: '按群覆盖欢迎语、审核、违禁词、链接、图片、群员检查等设置', component: GroupDetail },
       { key: 'banned-words', label: '违禁词与链接', icon: '🚫', desc: '全局违禁词库、禁发链接与禁发图片（全局样本库）', component: BannedWords },
-      { key: 'member-check', label: '群员检查', icon: '🔎', desc: '按群配置：按 QQ 等级 / 群名片 / 群等级定时检查成员并自动处理', component: MemberCheck },
     ],
   },
   {

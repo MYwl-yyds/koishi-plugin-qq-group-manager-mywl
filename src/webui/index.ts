@@ -342,31 +342,6 @@ async function buildSettings(svc: Services) {
 
 // ---------------- 群员检查 ----------------
 // 群员检查已改为纯群级配置：每个群一份独立配置，无全局回退。
-async function buildMemberCheck(svc: Services, params: any = {}) {
-  const gid = String(params.groupId || '')
-  let hits: any[] = []
-  let previewError = ''
-  let config: any = null
-  if (gid) {
-    // 直接取该群的生效配置（群员检查不再从全局合并）
-    config = (await svc.settings.getGroup(gid)).memberCheck
-    try {
-      hits = await svc.memberCheck.preview(gid)
-    } catch (e) {
-      previewError = (e as Error).message
-    }
-  }
-  return {
-    updatedAt: Date.now(),
-    config,
-    groupId: gid,
-    hits,
-    previewError,
-    lastRunAt: svc.memberCheck?.getLastRunAt?.() ?? 0,
-    lastResults: svc.memberCheck?.getLastResults?.() ?? [],
-  }
-}
-
 // ---------------- 单个群的配置详情（按需加载，避免列表页传输全部群配置） ----------------
 async function buildGroupDetail(svc: Services, groupId: string) {
   const gid = String(groupId || '')
@@ -396,7 +371,6 @@ async function buildScope(svc: Services, scope: string, params: any = {}): Promi
     case 'logs': return buildLogs(svc, params)
     case 'permissions': return buildPermissions(svc)
     case 'settings': return buildSettings(svc)
-    case 'memberCheck': return buildMemberCheck(svc, params)
     default: return { updatedAt: Date.now() }
   }
 }
@@ -428,11 +402,8 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
         break
       }
       case 'setGroup': {
-        // 调用方可通过 data.scope 指定「希望拿到哪一份重建后的数据」：
-        // - groupDetail（默认）：群配置详情页
-        // - memberCheck：群员检查页（它另有预览命中成员等数据，不能只靠 groupDetail）
-        const want = String(data.scope || 'groupDetail')
-        scope = (want === 'memberCheck') ? 'memberCheck' : 'groupDetail'
+        // 群配置统一走 groupDetail 域（群员检查已并入群配置详情页，不再有独立域）
+        scope = 'groupDetail'
         await svc.settings.setGroup(data.groupId, data.patch)
         await log.operation('WebUI修改群配置', { groupId: data.groupId })
         break
@@ -515,6 +486,20 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
         break
       }
 
+      // 名单中心：切换某群的「应用全局黑/白名单」。
+      // 单独开一个动作而不用通用 setGroup，是为了让响应直接带回重建后的 lists 域，
+      // 否则前端只能拿到 groupDetail，还得再发一次请求去刷新名单（保存时的明显卡顿）。
+      case 'lists.setApplyGlobal': {
+        scope = 'lists'
+        const patch: any = {}
+        if (data.blacklist !== undefined) patch.applyGlobalBlacklist = data.blacklist === true
+        if (data.whitelist !== undefined) patch.applyGlobalWhitelist = data.whitelist === true
+        if (Object.keys(patch).length === 0) return { ok: false, error: '缺少要修改的名单范围字段' }
+        await svc.settings.setGroup(data.groupId, patch)
+        await log.operation('WebUI修改名单生效范围', { groupId: data.groupId, detail: JSON.stringify(patch) })
+        break
+      }
+
       case 'blacklist.add': {
         scope = 'lists'
         const groupId = data.groupId || ''
@@ -542,6 +527,31 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
           await svc.store.blacklistMoveToGlobal(String(u), data.groupId || '')
           await log.blacklist('转移黑名单至全局', { targetId: String(u), groupId: data.groupId || '' })
         }
+        break
+      }
+      case 'blacklist.moveGroup': {
+        // 全局黑名单 → 指定群；mode = move（从全局移除）| copy（全局保留）
+        scope = 'lists'
+        const target = String(data.targetGroupId || '')
+        if (!target) return { ok: false, error: '请先选择目标群' }
+        const mode: 'move' | 'copy' = data.mode === 'copy' ? 'copy' : 'move'
+        const users = Array.isArray(data.users) ? data.users : [data.userId].filter(Boolean)
+        let done = 0
+        for (const u of users) {
+          const ok = await svc.store.blacklistMoveToGroup(String(u), target, mode)
+          if (ok) done++
+          await log.blacklist(mode === 'move' ? '移动黑名单到指定群' : '复制黑名单到指定群', {
+            targetId: String(u), groupId: target, result: ok ? '成功' : '跳过（全局无该记录）',
+          })
+        }
+        if (done === 0) return { ok: false, error: '没有可转移的记录（全局黑名单中不存在所选成员）' }
+        break
+      }
+      case 'blacklist.clear': {
+        scope = 'lists'
+        const groupId = data.groupId || ''
+        const n = await svc.store.blacklistClearScope(groupId)
+        await log.blacklist('清空黑名单', { groupId, result: `删除 ${n} 条` })
         break
       }
 
@@ -578,6 +588,31 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
           await svc.store.whitelistMoveToGlobal(String(u), data.groupId || '')
           await log.operation('WebUI转移白名单至全局', { targetId: String(u), groupId: data.groupId || '' })
         }
+        break
+      }
+      case 'whitelist.moveGroup': {
+        // 全局白名单 → 指定群；mode = move（从全局移除）| copy（全局保留）
+        scope = 'lists'
+        const target = String(data.targetGroupId || '')
+        if (!target) return { ok: false, error: '请先选择目标群' }
+        const mode: 'move' | 'copy' = data.mode === 'copy' ? 'copy' : 'move'
+        const users = Array.isArray(data.users) ? data.users : [data.userId].filter(Boolean)
+        let done = 0
+        for (const u of users) {
+          const ok = await svc.store.whitelistMoveToGroup(String(u), target, mode)
+          if (ok) done++
+          await log.operation(mode === 'move' ? 'WebUI移动白名单到指定群' : 'WebUI复制白名单到指定群', {
+            targetId: String(u), groupId: target, result: ok ? '成功' : '跳过（全局无该记录）',
+          })
+        }
+        if (done === 0) return { ok: false, error: '没有可转移的记录（全局白名单中不存在所选成员）' }
+        break
+      }
+      case 'whitelist.clear': {
+        scope = 'lists'
+        const groupId = data.groupId || ''
+        const n = await svc.store.whitelistClearScope(groupId)
+        await log.operation('WebUI清空白名单', { groupId, result: `删除 ${n} 条` })
         break
       }
       case 'whitelist.update': {
@@ -650,28 +685,7 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
         break
       }
 
-      // 群员检查
-      case 'memberCheck.scan': {
-        scope = 'memberCheck'
-        const result = await svc.memberCheck.manualCheck(data.groupId, data.kind)
-        await log.operation('WebUI手动群员检查', {
-          groupId: data.groupId,
-          result: `扫描 ${result.scanned}，命中 ${result.hits}，禁言 ${result.actions.mute}，踢出 ${result.actions.kick}`,
-        })
-        break
-      }
-      case 'memberCheck.scanAll': {
-        // 调用方通过 data.scope 指定希望刷新哪一份数据：
-        // - settings（默认）：群员检查页的「最近一次执行」来自 settings 域
-        // - overview：总览页的运行状态卡片
-        // - memberCheck：需要同步该群的预览命中列表时
-        const want = String(data.scope || 'settings')
-        scope = want === 'overview' ? 'overview' : (want === 'memberCheck' ? 'memberCheck' : 'settings')
-        const results = await svc.memberCheck.scanAll()
-        const total = results.reduce((a: number, r: any) => a + r.hits, 0)
-        await log.operation('WebUI全量群员检查', { result: `共 ${results.length} 个群，命中 ${total}` })
-        break
-      }
+      // 群员检查仅由定时任务自动执行（原「手动单群 / 全量检查」入口已随独立页面一同移除）
 
       // 禁发指定图片（样本库管理 + 比对测试）
       // groupId 为空 = 全局样本；非空 = 该群专属样本。
@@ -834,10 +848,10 @@ async function handleMutate(svc: Services, action: string, data: any, operatorNa
         return { ok: false, error: `未知操作 ${action}` }
     }
     // 重建受影响的数据域并连同数据一起返回，前端可直接采用，避免再发一次请求。
-    // 带参数的域（groupDetail / memberCheck）需要 groupId：优先取显式 params，
+    // 带参数的域（groupDetail）需要 groupId：优先取显式 params，
     // 否则回退到 data.groupId（setGroup 与群级样本操作都是直接带 groupId 的）。
     let params = data?.params || {}
-    if ((scope === 'groupDetail' || scope === 'memberCheck') && !params.groupId && data?.groupId) {
+    if (scope === 'groupDetail' && !params.groupId && data?.groupId) {
       params = { ...params, groupId: String(data.groupId) }
     }
     return { ok: true, scope, data: await buildScope(svc, scope, params) }

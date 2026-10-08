@@ -402,6 +402,51 @@
 /* 黑/白名单左侧「分群 + 应用全局名单」行 */
 .qg-group-row { border-bottom: 1px dashed var(--qg-border); padding-bottom: 6px; margin-bottom: 6px; }
 .qg-group-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
+/* 侧栏内每行的「清空」小按钮 */
+.qg-clear-btn {
+  flex: 0 0 auto;
+  border: 1px solid var(--qg-border);
+  background: transparent;
+  color: var(--qg-muted);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background .14s, color .14s, border-color .14s;
+}
+.qg-clear-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--qg-danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--qg-danger) 45%, transparent);
+  color: var(--qg-danger);
+}
+.qg-clear-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* 名单批量操作栏 */
+.qg-bulk-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 11px; margin-top: 10px;
+  border: 1px solid var(--qg-border-2); border-radius: 10px;
+  background: var(--qg-card-2);
+}
+.qg-bulk-all {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--qg-text-2); cursor: pointer; user-select: none;
+}
+.qg-bulk-all input, .qg-check-col input { accent-color: var(--qg-primary); cursor: pointer; }
+.qg-bulk-count { font-size: 12.5px; color: var(--qg-muted); }
+.qg-bulk-bar .qg-select, .qg-bulk-bar .qg-input { max-width: 190px; }
+/* 把「清空本名单」推到最右，避免与批量按钮误点 */
+.qg-bulk-bar .qg-bulk-end { margin-left: auto; }
+
+/* 名单表格的复选框列 + 选中行高亮 */
+.qg-check-col { width: 38px; text-align: center; }
+.qg-table td.qg-check-col { text-align: center; }
+.qg-table tbody tr.qg-row-selected td {
+  background: color-mix(in srgb, var(--qg-primary) 9%, transparent);
+}
+
 .qg-apply {
   display: flex; align-items: center; gap: 6px;
   font-size: 11.5px; color: var(--qg-muted); cursor: pointer;
@@ -594,6 +639,14 @@
   /* 按钮组换行，避免溢出屏幕 */
   .qg-add { flex-wrap: wrap; }
   .qg-add .qg-input, .qg-add select { min-width: 0; flex: 1 1 140px; }
+
+  /* 名单批量操作栏：小屏下换行、目标群下拉占满一行 */
+  .qg-bulk-bar { gap: 8px; padding: 10px; }
+  .qg-bulk-bar .qg-select { max-width: none; flex: 1 1 100%; }
+  .qg-bulk-bar .qg-bulk-end { margin-left: 0; }
+  .qg-bulk-count { width: 100%; }
+  /* 侧栏「清空」按钮加大触控区域 */
+  .qg-clear-btn { padding: 5px 10px; font-size: 12px; }
 
   /* 卡片内边距收紧 */
   .qg-card { padding: 12px; }

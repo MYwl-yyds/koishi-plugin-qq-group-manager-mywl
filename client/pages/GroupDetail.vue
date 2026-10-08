@@ -357,7 +357,7 @@
 
           <h4 class="qg-sub-title">扫描调度（本群）</h4>
           <p class="qg-hint tight">
-            这些参数与「群员检查」页面完全同步（同一份群级配置），在哪边改都可以。
+            这些参数即该群的群员检查调度配置（纯群级，不参与全局继承）。
             大群建议：并发 1~2、等级缓存 12~24 小时、扫描间隔 ≥60 分钟。
           </p>
           <div class="qg-grid four">
@@ -379,7 +379,8 @@
               <NoticeEditor title="群等级命中通知" v-model="form.mcGroupNotice" hint="变量：{userId} {nickname} {groupId} {level} {threshold} {punish}" />
               <p class="qg-hint">
                 三类检测的触发操作互相独立，可分别为禁言 / 踢出 / 仅记录。
-                保存后可在「群员检查」页面预览命中名单或立即执行一次扫描。
+                检查由定时任务自动执行，不提供手动触发；启用前建议先用「仅记录」跑一轮，
+                再到「总览」的运行状态与「操作记录」中确认判定是否准确。
               </p>
             </div>
           </div>
@@ -641,8 +642,8 @@ function fillFrom(cfg: any, g: any) {
   form.mcGroupAction = mc?.groupLevel?.action ?? 'none'
   form.mcGroupMuteDuration = mc?.groupLevel?.muteDuration ?? 10
   form.mcGroupWhenUnknown = mc?.groupLevel?.whenUnknown ?? 'skip'
-  // 调度参数同样是群级配置。默认值必须与「群员检查」页面、constants.ts 完全一致，
-  // 否则两个页面各自保存时会用不同的默认值互相覆盖，表现为「开关/参数同步不了」。
+  // 调度参数同样是群级配置。默认值必须与 constants.ts 中的 DEFAULT_CONFIG 完全一致，
+  // 否则读不到值时表单会显示成另一种默认值，一保存就把该群的调度参数改写掉。
   form.mcIntervalMinutes = mc?.intervalMinutes ?? 30
   form.mcTimeoutSeconds = mc?.timeoutSeconds ?? 60
   form.mcBatchSize = mc?.batchSize ?? 2

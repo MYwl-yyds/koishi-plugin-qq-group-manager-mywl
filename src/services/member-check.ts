@@ -156,7 +156,7 @@ export class MemberCheckService {
     return this.scanGroups(groupIds)
   }
 
-  // 检查单个群（可被 WebUI 手动触发）
+  // 检查单个群（仅由定时任务调用；WebUI 已不再提供手动触发入口）
   async checkGroup(groupId: string, onlyKind?: MemberCheckHit['kind']): Promise<MemberCheckResult> {
     const gid = idOf(groupId)
     const started = Date.now()
@@ -550,11 +550,6 @@ export class MemberCheckService {
     this.log().info(`群 ${hit.groupId} 成员 ${hit.userId} 命中${hit.kindName}：${hit.detail}`)
   }
 
-  // WebUI：手动触发指定群检查
-  async manualCheck(groupId: string, kind?: MemberCheckHit['kind']): Promise<MemberCheckResult> {
-    return this.checkGroup(groupId, kind)
-  }
-
   getLastResults(): MemberCheckResult[] {
     return this.lastResults
   }
@@ -562,103 +557,5 @@ export class MemberCheckService {
   getLastRunAt(): number {
     return this.lastRunAt
   }
-
-  // 预览：不执行任何操作，仅返回会命中的成员列表（供 WebUI 试运行）
-  async preview(groupId: string, kind?: MemberCheckHit['kind']): Promise<MemberCheckHit[]> {
-    const gid = idOf(groupId)
-    if (!gid) return []
-    const cfg = await this.svc.settings.getGroup(gid)
-    if (!this.ruleEnabled(cfg)) return []
-    const session = this.sessionOf(gid)
-    if (!session) return []
-    const mc = cfg.memberCheck
-    const members: MemberInfo[] = await this.svc.onebot.getMemberList(session, gid, 0)
-    const selfId = idOf((session.bot as any)?.selfId ?? (session.bot as any)?.userId)
-    const superUsers = new Set<string>((await this.svc.settings.getGlobal()).superUsers || [])
-    const targets: MemberInfo[] = members.filter((m) => m.userId && m.userId !== selfId && !superUsers.has(m.userId))
-    const hits: MemberCheckHit[] = []
-
-    const needQqLevel = !!mc.qqLevel?.enabled && (!kind || kind === 'qqLevel')
-    const qqLevelMap = new Map<string, number | null>()
-    if (needQqLevel) {
-      // 与 runGroup 保持一致：低并发、长缓存、带退避重试，避免大群预览触发限流
-      const concurrency = Math.max(1, Number(mc.batchSize) || 2)
-      const levelTtl = Math.max(0, Number(mc.levelCacheHours ?? 6)) * 3600000
-      const infos = await mapConcurrent(targets.map((m) => m.userId), concurrency, async (uid) => {
-        const info = await this.svc.onebot.getStrangerInfo(session, uid, levelTtl, 1)
-        return [uid, info && typeof info.level === 'number' && info.level >= 1 ? info.level : null] as [string, number | null]
-      })
-      for (const [uid, level] of infos) qqLevelMap.set(uid, level)
-    }
-
-    // 白名单预加载，避免逐成员查库
-    let whitelistIds = new Set<string>()
-    if (mc.card?.enabled && mc.card.excludeWhitelist !== false) {
-      const scopeId = cfg.applyGlobalWhitelist === true ? '' : gid
-      const wl = await this.svc.store.whitelistList(scopeId).catch(() => [])
-      whitelistIds = new Set((wl || []).map((w: any) => String(w.userId)))
-    }
-
-    for (const m of targets) {
-      if (needQqLevel) {
-        const level = qqLevelMap.get(m.userId)
-        // 与 runGroup 一致：未知（接口失败）时按 whenUnknown 决定是否算命中
-        if (level === null || level === undefined) {
-          if (mc.qqLevel.whenUnknown === 'trigger') {
-            hits.push({
-              groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
-              kind: 'qqLevel', kindName: 'QQ等级',
-              detail: `QQ 等级获取失败（按配置视为命中，要求 ≥ ${mc.qqLevel.minLevel}）`,
-              level: '', word: '', threshold: String(mc.qqLevel.minLevel),
-            })
-          }
-        } else if (level < Number(mc.qqLevel.minLevel)) {
-          hits.push({
-            groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
-            kind: 'qqLevel', kindName: 'QQ等级',
-            detail: `QQ 等级 ${level} 低于要求 ${mc.qqLevel.minLevel}`,
-            level: String(level), word: '', threshold: String(mc.qqLevel.minLevel),
-          })
-        }
-      }
-      if (mc.card?.enabled && (!kind || kind === 'card') && mc.card.patterns?.length) {
-        const excludeAdmin = mc.card.excludeAdmins !== false && (m.role === 'admin' || m.role === 'owner')
-        const excludeWl = mc.card.excludeWhitelist !== false && whitelistIds.has(String(m.userId))
-        if (!excludeAdmin && !excludeWl) {
-          const display = m.card || m.nickname || ''
-          const word = matchCard(display, mc.card)
-          if (word) {
-            hits.push({
-              groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
-              kind: 'card', kindName: '群名片',
-              detail: `群名片「${display}」${mc.card.matchMode === 'equals' ? '完全等于' : '包含'}「${word}」`,
-              level: '', word, threshold: mc.card.matchMode === 'equals' ? '完全等于' : '包含',
-            })
-          }
-        }
-      }
-      // 群等级：与 runGroup 保持一致的三态处理 —— 未知按 whenUnknown 决定，
-      // 已知且低于阈值才算命中（normalizeMember 已把 0 归一为 -1=未知）
-      if (mc.groupLevel?.enabled && (!kind || kind === 'groupLevel')) {
-        if (m.level < 0) {
-          if (mc.groupLevel.whenUnknown === 'trigger') {
-            hits.push({
-              groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
-              kind: 'groupLevel', kindName: '群等级',
-              detail: `群等级获取失败（按配置视为命中，要求 ≥ ${mc.groupLevel.minLevel}）`,
-              level: '', word: '', threshold: String(mc.groupLevel.minLevel),
-            })
-          }
-        } else if (m.level < Number(mc.groupLevel.minLevel)) {
-          hits.push({
-            groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
-            kind: 'groupLevel', kindName: '群等级',
-            detail: `群等级 ${m.level} 低于要求 ${mc.groupLevel.minLevel}`,
-            level: String(m.level), word: '', threshold: String(mc.groupLevel.minLevel),
-          })
-        }
-      }
-    }
-    return hits
-  }
 }
+

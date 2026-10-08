@@ -166,6 +166,28 @@ export class Store {
     return true
   }
 
+  // 全局黑名单 → 指定群（WebUI「转移到指定群」）。
+  // mode = 'move'：从全局移除；mode = 'copy'：全局保留，目标群再加一份。
+  // 刻意用 blacklistUpsert 绕过「白名单豁免」守卫：这是管理员的显式操作，
+  // 若因豁免而写入失败，move 模式下会出现「全局已删、目标群没写进去」的静默丢失。
+  async blacklistMoveToGroup(userId: string, targetGroupId: string, mode: 'move' | 'copy' = 'move'): Promise<boolean> {
+    if (!targetGroupId) return false
+    const res = await this.db.get('gm_blacklist', { userId, groupId: '' })
+    if (res.length === 0) return false
+    await this.blacklistUpsert(userId, targetGroupId, res[0].source, res[0].createdAt)
+    if (mode === 'move') await this.blacklistRemove(userId, '')
+    return true
+  }
+
+  // 清空指定范围的黑名单（groupId 为 '' 表示全局），返回实际删除条数。
+  // 与 blacklistClear()（清空所有范围，导入 replace 用）区分开。
+  async blacklistClearScope(groupId = ''): Promise<number> {
+    const rows = await this.db.get('gm_blacklist', { groupId })
+    if (!Array.isArray(rows)) return 0
+    for (const row of rows) await this.db.remove('gm_blacklist', { id: row.id })
+    return rows.length
+  }
+
   // ---------- 白名单 ----------
   async whitelistAdd(
     userId: string,
@@ -233,6 +255,25 @@ export class Store {
     await this.whitelistAdd(userId, '', res[0], res[0].createdAt)
     await this.whitelistRemove(userId, groupId)
     return true
+  }
+
+  // 全局白名单 → 指定群（WebUI「转移到指定群」），三项豁免开关一并带过去。
+  // mode = 'move'：从全局移除；mode = 'copy'：全局保留。
+  async whitelistMoveToGroup(userId: string, targetGroupId: string, mode: 'move' | 'copy' = 'move'): Promise<boolean> {
+    if (!targetGroupId) return false
+    const res = await this.db.get('gm_whitelist', { userId, groupId: '' })
+    if (res.length === 0) return false
+    await this.whitelistAdd(userId, targetGroupId, res[0], res[0].createdAt)
+    if (mode === 'move') await this.whitelistRemove(userId, '')
+    return true
+  }
+
+  // 清空指定范围的白名单（groupId 为 '' 表示全局），返回实际删除条数
+  async whitelistClearScope(groupId = ''): Promise<number> {
+    const rows = await this.db.get('gm_whitelist', { groupId })
+    if (!Array.isArray(rows)) return 0
+    for (const row of rows) await this.db.remove('gm_whitelist', { id: row.id })
+    return rows.length
   }
 
   // ---------- 权限组 ----------

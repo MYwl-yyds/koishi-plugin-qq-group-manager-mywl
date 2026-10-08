@@ -74,9 +74,9 @@ export function useScope<T = any>(scope: string, options: {
   immediate?: boolean
 } = {}): ScopeState<T> {
   // 优先用「同参数」缓存，其次用该域上次的数据（切换页面时先出画面再静默刷新）。
-  // 注意：带参数域（如 groupDetail / memberCheck 按群号取数）回退到 latest 时，
+  // 注意：带参数域（如 groupDetail 按群号取数）回退到 latest 时，
   // 拿到的可能是「别的参数」的数据。页面必须校验返回数据里的 groupId 是否等于当前群号，
-  // 否则会用上一个群的内容回填表单 —— GroupDetail.vue / MemberCheck.vue 均已加该校验。
+  // 否则会用上一个群的内容回填表单 —— GroupDetail.vue 已加该校验。
   const initParams = options.params?.() || {}
   const exactKey = scope + (Object.keys(initParams).length ? ':' + JSON.stringify(initParams) : '')
   const data = ref<T | null>((cache.get(exactKey)?.data ?? latest.get(scope) ?? null)) as Ref<T | null>
@@ -146,11 +146,10 @@ export function useScope<T = any>(scope: string, options: {
 //
 // 缓存写入规则：
 // - 无参数域（groups / settings / lists …）：写入以域名为键的缓存；
-// - 带参数域（groupDetail / memberCheck）：后端返回的是「本次操作对应的那份数据」，
+// - 带参数域（groupDetail）：后端返回的是「本次操作对应的那份数据」，
 //   按 mutate 时传入的 params（或 groupId）拼出同样的键写入，这样页面下次读到的就是它。
 const PARAM_SCOPES: Record<string, string> = {
   groupDetail: 'groupId',
-  memberCheck: 'groupId',
 }
 
 export async function mutate(action: string, payload: any = {}, extraParams: any = {}): Promise<any> {
