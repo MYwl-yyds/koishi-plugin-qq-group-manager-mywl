@@ -200,6 +200,15 @@ export interface MemberCheckGroupLevelConfig extends MemberCheckRule {
   whenUnknown: 'skip' | 'trigger'
 }
 
+// 检测黑名单：成员命中黑/白名单时按规则处理。
+// 语义与其它三项一致 ——「满足条件即命中」：在黑名单中即为命中。
+export interface MemberCheckBlacklistConfig extends MemberCheckRule {
+  // 检测哪一份名单：黑名单（默认）或白名单
+  listType: 'blacklist' | 'whitelist'
+  // 命中后是否也把该成员加入黑名单（仅 action 为 none/mute 时有意义，踢出后无需再加）
+  addToBlacklist: boolean
+}
+
 export interface MemberCheckConfig {
   enabled: boolean
   // 扫描间隔（分钟）
@@ -222,6 +231,7 @@ export interface MemberCheckConfig {
   qqLevel: MemberCheckQqLevelConfig
   card: MemberCheckCardConfig
   groupLevel: MemberCheckGroupLevelConfig
+  blacklist: MemberCheckBlacklistConfig
 }
 
 export interface LevelPunishment {
@@ -264,12 +274,9 @@ export interface NoticeConfig {
   text: string
 }
 
-export type OneBotFramework = 'auto' | 'napcat' | 'llbot'
-
 export interface Config {
   enableGroupManagement: boolean
   superUsers: string[]
-  onebotFramework: OneBotFramework
   applyGlobalBlacklist: boolean
   applyGlobalWhitelist: boolean
   mute: MuteConfig

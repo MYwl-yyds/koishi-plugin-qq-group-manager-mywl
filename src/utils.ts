@@ -134,6 +134,36 @@ export function extractUser(session: Session, raw?: string): string {
   return match ? match[0] : ''
 }
 
+// 只取消息中真正的文本段内容（不含 @ / 引用 / 图片 / 表情等段）。
+// 关键：不能用 session.content —— 它会把整条消息序列化，
+// 引用回复时形如「[quote:id=123] 同意」，导致 /^(同意|通过|y|yes)/ 之类的
+// 意图判断永远匹配不上。所有「解析用户输入文本」的地方都必须走这里。
+export function plainText(session: Session): string {
+  const parts: string[] = []
+  for (const el of (session.elements || []) as any[]) {
+    if (el?.type !== 'text') continue
+    const v = el.attrs?.content ?? el.attrs?.text ?? ''
+    if (typeof v === 'string' && v) parts.push(v)
+  }
+  if (parts.length > 0) return parts.join('')
+  // 部分适配器不提供 elements，此时退回 content，但必须先剥掉段标记，
+  // 否则引用段/图片段会被当成用户输入的一部分。
+  const raw = String(session.content ?? '')
+  return raw ? stripSegmentMarkup(raw) : ''
+}
+
+// 去掉形如 [quote:...] / [image:...] / [CQ:reply,...] 的段标记，只留纯文本。
+export function stripSegmentMarkup(raw: string): string {
+  return raw
+    .replace(/\[CQ:[^\]]*\]/gi, ' ')
+    .replace(/\[[a-z0-9_]+:[^\]]*\]/gi, ' ')
+    .replace(/<[a-z0-9_]+[^>]*>/gi, ' ')
+    .replace(/https?:\/\/[^\s]*qpic\.cn[^\s]*/gi, ' ')
+    .replace(/https?:\/\/[^\s]*qlogo\.cn[^\s]*/gi, ' ')
+    .replace(/https?:\/\/[^\s]*gtimg\.cn[^\s]*/gi, ' ')
+    .trim()
+}
+
 // 取被引用消息的作者 QQ（OneBot v11 的 reply/quote 元素带 id，需再查一次消息）
 export function quotedUserId(session: Session): string {
   for (const el of session.elements || []) {

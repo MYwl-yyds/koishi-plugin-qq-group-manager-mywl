@@ -13,7 +13,9 @@ import { ExportService } from './export'
 
 export function createServices(ctx: Context, config: Config): Services {
   const store = new Store(ctx)
-  const onebot = new OneBotService(ctx, config.onebotFramework ?? 'auto')
+  // 所有接口统一按标准 OneBot v11（snake_case action + 对象参数）调用，
+  // 已兼容 NapCat / LLBot / go-cqhttp，无需再按框架分支。
+  const onebot = new OneBotService(ctx)
   const settings = new SettingsService(ctx, store, config)
   const services: Services = {
     ctx,

@@ -10,7 +10,7 @@ export interface MemberCheckHit {
   nickname: string
   card: string
   // 命中的检查类型
-  kind: 'qqLevel' | 'card' | 'groupLevel'
+  kind: 'qqLevel' | 'card' | 'groupLevel' | 'blacklist'
   kindName: string
   // 触发说明（用于日志/通知）
   detail: string
@@ -80,7 +80,7 @@ export class MemberCheckService {
   private ruleEnabled(cfg: Config): boolean {
     const mc = cfg.memberCheck
     if (!mc?.enabled) return false
-    return !!(mc.qqLevel?.enabled || mc.card?.enabled || mc.groupLevel?.enabled)
+    return !!(mc.qqLevel?.enabled || mc.card?.enabled || mc.groupLevel?.enabled || mc.blacklist?.enabled)
   }
 
   // 启动定时扫描（插件启动时调用一次）
@@ -379,11 +379,23 @@ export class MemberCheckService {
     // 预热白名单，避免在成员循环里逐条查库（大群下这是主要耗时来源之一）。
     // 语义与 store.whitelistEntry 保持一致：applyGlobalWhitelist 为真时查全局条目，
     // 否则查本群条目。
+    const needWhitelistSet = (mc.card?.enabled && mc.card.excludeWhitelist !== false)
+      || (mc.blacklist?.enabled && mc.blacklist.listType === 'whitelist')
     let whitelistIds = new Set<string>()
-    if (mc.card?.enabled && mc.card.excludeWhitelist !== false) {
+    if (needWhitelistSet) {
       const scopeId = cfg.applyGlobalWhitelist === true ? '' : gid
       const wl = await this.svc.store.whitelistList(scopeId).catch(() => [])
       whitelistIds = new Set((wl || []).map((w: any) => String(w.userId)))
+    }
+
+    // 黑名单检测：同样一次性预加载，避免逐成员查库。
+    const needBlacklist = !!mc.blacklist?.enabled && (!onlyKind || onlyKind === 'blacklist')
+    // 名单归属跟随该群的「应用全局黑/白名单」开关，与运行时判定保持一致
+    const blacklistIds = new Set<string>()
+    if (needBlacklist && mc.blacklist.listType === 'blacklist') {
+      const scopeId = cfg.applyGlobalBlacklist === true ? '' : gid
+      const bl = await this.svc.store.blacklistList(scopeId).catch(() => [])
+      for (const b of bl || []) blacklistIds.add(String((b as any).userId))
     }
 
     // 因本轮超时而被跳过的成员：绝不能进入处罚判定。
@@ -463,6 +475,30 @@ export class MemberCheckService {
         }
       }
 
+      // 4. 黑名单 / 白名单
+      // 与其它三项一致：满足条件即命中。黑名单模式下「在黑名单中」为命中。
+      if (needBlacklist && mc.blacklist.enabled) {
+        const listType = mc.blacklist.listType === 'whitelist' ? 'whitelist' : 'blacklist'
+        const uid = String(m.userId)
+        if (listType === 'blacklist') {
+          if (blacklistIds.has(uid)) {
+            hits.push({
+              groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
+              kind: 'blacklist', kindName: '黑名单',
+              detail: '该成员在黑名单中',
+              level: '', word: '黑名单', threshold: '黑名单',
+            })
+          }
+        } else if (!whitelistIds.has(uid)) {
+          hits.push({
+            groupId: gid, userId: m.userId, nickname: m.nickname, card: m.card,
+            kind: 'blacklist', kindName: '白名单',
+            detail: '该成员不在白名单中',
+            level: '', word: '白名单', threshold: '白名单',
+          })
+        }
+      }
+
       for (const hit of hits) {
         // 冷却：同一成员在冷却期内不重复处理（用预加载的 stateMap，避免逐条查库）
         if (cooldownMs > 0) {
@@ -512,6 +548,22 @@ export class MemberCheckService {
       }
     } else {
       done.push('仅记录')
+    }
+
+    // 黑名单检测可额外把该成员写入黑名单（踢出后无需再加，故仅在非踢出时执行）
+    if (hit.kind === 'blacklist' && action !== 'kick') {
+      const bl = cfg.memberCheck.blacklist
+      if (bl?.addToBlacklist) {
+        // 名单归属跟随该群开关，与运行时判定保持一致
+        const scopeId = cfg.applyGlobalBlacklist === true ? '' : hit.groupId
+        try {
+          const ok = await this.svc.store.blacklistAdd(hit.userId, 'auto', scopeId)
+          // 命中的是白名单条目时 blacklistAdd 会被白名单豁免挡掉，需如实反馈
+          done.push(ok ? '已加入黑名单' : '未加入黑名单（该成员在白名单中）')
+        } catch (e) {
+          result.errors.push(`加入黑名单 ${hit.userId} 失败：${(e as Error).message}`)
+        }
+      }
     }
 
     // 尽力撤回该成员最近一条消息（OneBot 无「撤回最近一条」接口，仅在被动消息场景可用）

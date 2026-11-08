@@ -7,6 +7,36 @@ const OPTIONAL_VARS = ['answer', 'level', 'groupIntro', 'memberCount']
 // 需要自动补全的群信息变量
 const GROUP_VARS = ['groupName', 'groupIntro', 'groupAvatar', 'memberCount']
 
+// 该模板是否用到了群信息变量（供不经过 NoticeService 的调用方按需补全）
+export function needsGroupVars(text: string): boolean {
+  return GROUP_VARS.some((k) => String(text ?? '').includes(`{${k}}`))
+}
+
+// 按模板需要补全变量：群信息变量走 getGroupProfile，{level} 走 getStrangerInfo。
+// 抽出来供「欢迎语/欢送语」「通知转发」等不经过 NoticeService 的场景复用，
+// 避免各处重复实现导致某些模板里 {avatar} / {groupAvatar} 静默失效。
+export async function enrichVars(
+  onebot: any,
+  session: any,
+  text: string,
+  vars: Record<string, string>,
+  groupId: string,
+): Promise<Record<string, string>> {
+  const enriched: Record<string, string> = { ...vars }
+  if (needsGroupVars(text) && groupId) {
+    const p = await onebot.getGroupProfile(session, groupId)
+    enriched['groupName'] = p.name
+    enriched['groupIntro'] = p.intro
+    enriched['groupAvatar'] = p.avatar
+    enriched['memberCount'] = p.memberCount
+  }
+  if (text.includes('{level}') && !enriched['level'] && enriched['userId']) {
+    const stranger = await onebot.getStrangerInfo(session, enriched['userId'])
+    enriched['level'] = stranger && typeof stranger.level === 'number' ? String(stranger.level) : ''
+  }
+  return enriched
+}
+
 // 渲染通知模板（支持变量与条件行），返回可直接发送的消息片段数组
 export function renderNotice(template: string, vars: Record<string, string>): any[] {
   const avatarUrl = vars['userId'] ? `https://q1.qlogo.cn/g?b=qq&nk=${vars['userId']}&s=640` : ''
@@ -63,18 +93,7 @@ export class NoticeService {
       if (!notice || !notice.enabled) return
       const text = String(notice.text ?? '')
       const groupId = vars['groupId'] || fallbackGroup || ''
-      const enriched: Record<string, string> = { ...vars }
-      if (GROUP_VARS.some((k) => text.includes(`{${k}}`)) && groupId) {
-        const p = await this.onebot.getGroupProfile(session, groupId)
-        enriched['groupName'] = p.name
-        enriched['groupIntro'] = p.intro
-        enriched['groupAvatar'] = p.avatar
-        enriched['memberCount'] = p.memberCount
-      }
-      if (text.includes('{level}') && !enriched['level'] && enriched['userId']) {
-        const stranger = await this.onebot.getStrangerInfo(session, enriched['userId'])
-        enriched['level'] = stranger && typeof stranger.level === 'number' ? String(stranger.level) : ''
-      }
+      const enriched = await enrichVars(this.onebot, session, text, vars, groupId)
       const content = renderNotice(text, enriched)
       if (!content || content.length === 0) return
       if (notice.mode === 'private') {

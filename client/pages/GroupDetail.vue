@@ -90,7 +90,7 @@
               </label>
             </div>
           </div>
-          <p class="qg-hint">可用变量：{userId}=成员QQ、{groupId}=群号、{nickname}=成员昵称、{level}=QQ等级、{avatar}=头像图片。</p>
+          <p class="qg-hint">可用变量：{userId}=成员QQ、{groupId}=群号、{nickname}=成员昵称、{level}=QQ等级、{avatar}=QQ头像图片、{groupName}=群名称、{groupIntro}=群简介、{groupAvatar}=群头像图片、{memberCount}=群人数。</p>
         </Section>
 
         <!-- 入群审核 -->
@@ -273,10 +273,10 @@
             </div>
             <div class="qg-grid two" style="margin-top:12px">
               <div>
-                <NoticeEditor title="图片·撤回通知" v-model="form.imgRecallNotice" hint="变量：{userId} {nickname} {groupId} {distance} {image} {punish}" />
-                <NoticeEditor title="图片·禁言通知" v-model="form.imgBanNotice" hint="变量：{userId} {nickname} {groupId} {distance} {image} {punish}" />
+                <NoticeEditor title="图片·撤回通知" v-model="form.imgRecallNotice" hint="变量：{userId} {nickname} {groupId} {distance} {image} {punish} {avatar} {groupAvatar}" />
+                <NoticeEditor title="图片·禁言通知" v-model="form.imgBanNotice" hint="变量：{userId} {nickname} {groupId} {distance} {image} {punish} {avatar} {groupAvatar}" />
               </div>
-              <NoticeEditor title="图片·踢出通知" v-model="form.imgKickNotice" hint="变量：{userId} {nickname} {groupId} {distance} {image} {punish}" />
+              <NoticeEditor title="图片·踢出通知" v-model="form.imgKickNotice" hint="变量：{userId} {nickname} {groupId} {distance} {image} {punish} {avatar} {groupAvatar}" />
             </div>
           </template>
         </Section>
@@ -285,10 +285,10 @@
         <Section v-if="!form.bwInherit" title="违禁词通知（本群）" icon="🔔">
           <div class="qg-grid two">
             <div>
-              <NoticeEditor title="撤回通知" v-model="form.bwRecallNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish}" />
-              <NoticeEditor title="禁言通知" v-model="form.bwBanNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish}" />
+              <NoticeEditor title="撤回通知" v-model="form.bwRecallNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish} {avatar} {groupAvatar}" />
+              <NoticeEditor title="禁言通知" v-model="form.bwBanNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish} {avatar} {groupAvatar}" />
             </div>
-            <NoticeEditor title="踢出通知" v-model="form.bwKickNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish}" />
+            <NoticeEditor title="踢出通知" v-model="form.bwKickNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish} {avatar} {groupAvatar}" />
           </div>
         </Section>
 
@@ -296,10 +296,10 @@
         <Section v-if="!form.linkInherit" title="禁发链接通知（本群）" icon="🔔">
           <div class="qg-grid two">
             <div>
-              <NoticeEditor title="撤回通知" v-model="form.linkRecallNotice" hint="变量：{userId} {nickname} {groupId} {host} {link} {punish}" />
-              <NoticeEditor title="禁言通知" v-model="form.linkBanNotice" hint="变量：{userId} {nickname} {groupId} {host} {link} {punish}" />
+              <NoticeEditor title="撤回通知" v-model="form.linkRecallNotice" hint="变量：{userId} {nickname} {groupId} {host} {link} {punish} {avatar} {groupAvatar}" />
+              <NoticeEditor title="禁言通知" v-model="form.linkBanNotice" hint="变量：{userId} {nickname} {groupId} {host} {link} {punish} {avatar} {groupAvatar}" />
             </div>
-            <NoticeEditor title="踢出通知" v-model="form.linkKickNotice" hint="变量：{userId} {nickname} {groupId} {host} {link} {punish}" />
+            <NoticeEditor title="踢出通知" v-model="form.linkKickNotice" hint="变量：{userId} {nickname} {groupId} {host} {link} {punish} {avatar} {groupAvatar}" />
           </div>
         </Section>
 
@@ -353,6 +353,28 @@
               <ToggleRow label="取不到时处理" type="select" v-model="form.mcGroupWhenUnknown" :options="unknownOptions" />
               <p class="qg-hint tight">群等级来自 get_group_member_info 的 level 字段（群活跃等级）。</p>
             </div>
+            <div class="qg-card flat">
+              <h4>黑名单</h4>
+              <ToggleRow label="启用检测" v-model="form.mcBlEnabled" />
+              <ToggleRow
+                label="检测名单"
+                type="select"
+                v-model="form.mcBlListType"
+                :options="[{ label: '黑名单（在名单中即命中）', value: 'blacklist' }, { label: '白名单（不在名单中即命中）', value: 'whitelist' }]"
+              />
+              <ToggleRow label="触发操作" type="select" v-model="form.mcBlAction" :options="actionOptions" />
+              <ToggleRow label="禁言时长(分)" type="number" v-model="form.mcBlMuteDuration" :disabled="form.mcBlAction !== 'mute'" />
+              <ToggleRow
+                label="同时加入黑名单"
+                v-model="form.mcBlAddToBlacklist"
+                :disabled="form.mcBlAction === 'kick'"
+                title="仅「仅记录 / 禁言」时有效；踢出后无需再加入黑名单。名单归属跟随本群的「应用全局黑名单」开关"
+              />
+              <p class="qg-hint tight">
+                与其它三项一致：<b>满足条件即命中</b>。选「黑名单」时，成员在黑名单中即按规则处理；
+                选「白名单」则名单外的成员全部命中，<b>大群慎用</b>。
+              </p>
+            </div>
           </div>
 
           <h4 class="qg-sub-title">扫描调度（本群）</h4>
@@ -372,13 +394,14 @@
 
           <div class="qg-grid two" style="margin-top:12px">
             <div>
-              <NoticeEditor title="QQ 等级命中通知" v-model="form.mcQqNotice" hint="变量：{userId} {nickname} {groupId} {level} {threshold} {punish}" />
-              <NoticeEditor title="群名片命中通知" v-model="form.mcCardNotice" hint="变量：{userId} {nickname} {groupId} {card} {word} {punish}" />
+              <NoticeEditor title="QQ 等级命中通知" v-model="form.mcQqNotice" hint="变量：{userId} {nickname} {groupId} {level} {threshold} {punish} {avatar} {groupAvatar}" />
+              <NoticeEditor title="群名片命中通知" v-model="form.mcCardNotice" hint="变量：{userId} {nickname} {groupId} {card} {word} {punish} {avatar} {groupAvatar}" />
             </div>
             <div>
-              <NoticeEditor title="群等级命中通知" v-model="form.mcGroupNotice" hint="变量：{userId} {nickname} {groupId} {level} {threshold} {punish}" />
+              <NoticeEditor title="群等级命中通知" v-model="form.mcGroupNotice" hint="变量：{userId} {nickname} {groupId} {level} {threshold} {punish} {avatar} {groupAvatar}" />
+              <NoticeEditor title="黑名单命中通知" v-model="form.mcBlNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish} {avatar} {groupAvatar}" />
               <p class="qg-hint">
-                三类检测的触发操作互相独立，可分别为禁言 / 踢出 / 仅记录。
+                四类检测的触发操作互相独立，可分别为禁言 / 踢出 / 仅记录。
                 检查由定时任务自动执行，不提供手动触发；启用前建议先用「仅记录」跑一轮，
                 再到「总览」的运行状态与「操作记录」中确认判定是否准确。
               </p>
@@ -421,12 +444,12 @@
           <div class="qg-grid two">
             <div>
               <NoticeEditor title="入群判定结果通知" v-model="form.autoNotice" hint="变量：{userId} {nickname} {level} {avatar} {groupId} {groupName} {groupIntro} {groupAvatar} {memberCount} {answer} {result} {reason}" />
-              <NoticeEditor title="违禁词·撤回通知" v-model="form.bwRecallNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish}" />
+              <NoticeEditor title="违禁词·撤回通知" v-model="form.bwRecallNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish} {avatar} {groupAvatar}" />
             </div>
             <div>
-              <NoticeEditor title="违禁词·禁言通知" v-model="form.bwBanNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish}" />
-              <NoticeEditor title="违禁词·踢出通知" v-model="form.bwKickNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish}" />
-              <NoticeEditor title="退群自动拉黑通知" v-model="form.abNotice" hint="变量：{userId} {nickname} {groupId} {reason}" />
+              <NoticeEditor title="违禁词·禁言通知" v-model="form.bwBanNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish} {avatar} {groupAvatar}" />
+              <NoticeEditor title="违禁词·踢出通知" v-model="form.bwKickNotice" hint="变量：{userId} {nickname} {groupId} {word} {punish} {avatar} {groupAvatar}" />
+              <NoticeEditor title="退群自动拉黑通知" v-model="form.abNotice" hint="变量：{userId} {nickname} {groupId} {reason} {avatar} {groupAvatar}" />
             </div>
           </div>
         </Section>
@@ -490,6 +513,12 @@ const { data, loading, error, refresh } = useScope<any>('groupDetail', {
   immediate: false,
 })
 
+// 内置默认配置（由后端 buildGroupDetail 一并返回）：
+// 群员检查是纯群级配置、没有全局回退，未配置过的群若只回填 config，
+// 那几个通知模板输入框会是空的。用内置默认值兜底后再展示。
+// 必须定义在 data 之后（依赖它）。
+const builtinDefaults = computed<any>(() => data.value?.defaults || {})
+
 const groupOptions = computed(() => {
   const seen = new Set<string>()
   const out: Array<{ groupId: string, name: string }> = []
@@ -508,46 +537,52 @@ function split(s: any): string[] {
   return String(s || '').split(/[,，\s]+/).filter(Boolean)
 }
 
-function loadNotice(c: any, g: any) {
-  c = c || {}; g = g || {}
+// 内置默认配置（由后端 buildGroupDetail 一并返回）：
+// 群员检查是纯群级配置、没有全局回退，未配置过的群若只回填 config，
+// 那 4 个通知模板输入框会是空的。用默认值兜底后再展示。
+// 注意：必须定义在 data 之后（它依赖 data），否则 computed 会拿到 undefined 的初始绑定。
+function loadNotice(c: any, g: any, d?: any) {
+  c = c || {}; g = g || {}; d = d || {}
   return {
-    enabled: c.enabled ?? g.enabled ?? false,
-    mode: c.mode ?? g.mode ?? 'group',
-    targetId: c.targetId ?? g.targetId ?? '',
-    text: c.text || g.text || '',
+    enabled: c.enabled ?? g.enabled ?? d.enabled ?? false,
+    mode: c.mode ?? g.mode ?? d.mode ?? 'group',
+    targetId: c.targetId ?? g.targetId ?? d.targetId ?? '',
+    text: c.text || g.text || d.text || '',
   }
 }
 
 function fillFrom(cfg: any, g: any) {
   const c = cfg || {}
+  // 内置默认值：三级配置都没写过该字段时用它兜底，避免输入框显示为空
+  const dj = builtinDefaults.value?.joinReview || {}
   form.enableGroupManagement = c.enableGroupManagement !== undefined ? c.enableGroupManagement : g.enableGroupManagement
   form.muteEnabled = c.mute?.enabled ?? g.mute?.enabled
   form.muteMaxDuration = c.mute?.maxDuration ?? g.mute?.maxDuration ?? 43200
   form.welcomeEnabled = c.welcome?.enabled ?? g.welcome?.enabled
-  form.welcomeText = c.welcome?.text ?? g.welcome?.text ?? ''
+  form.welcomeText = c.welcome?.text ?? g.welcome?.text ?? builtinDefaults.value?.welcome?.text ?? ''
   form.farewellEnabled = c.farewell?.enabled ?? g.farewell?.enabled
-  form.farewellText = c.farewell?.text ?? g.farewell?.text ?? ''
+  form.farewellText = c.farewell?.text ?? g.farewell?.text ?? builtinDefaults.value?.farewell?.text ?? ''
   form.joinEnabled = c.joinReview?.enabled ?? g.joinReview?.enabled
   form.freqEnabled = c.joinReview?.frequency?.enabled ?? g.joinReview?.frequency?.enabled
   form.freqWindow = c.joinReview?.frequency?.windowMinutes ?? g.joinReview?.frequency?.windowMinutes ?? 10
   form.freqMax = c.joinReview?.frequency?.maxCount ?? g.joinReview?.frequency?.maxCount ?? 3
-  form.freqRejectReason = c.joinReview?.frequency?.rejectReason ?? g.joinReview?.frequency?.rejectReason ?? ''
+  form.freqRejectReason = c.joinReview?.frequency?.rejectReason ?? g.joinReview?.frequency?.rejectReason ?? dj?.frequency?.rejectReason ?? ''
   form.blEnabled = c.joinReview?.blacklist?.enabled ?? g.joinReview?.blacklist?.enabled
-  form.blRejectReason = c.joinReview?.blacklist?.rejectReason ?? g.joinReview?.blacklist?.rejectReason ?? ''
+  form.blRejectReason = c.joinReview?.blacklist?.rejectReason ?? g.joinReview?.blacklist?.rejectReason ?? dj?.blacklist?.rejectReason ?? ''
   form.levelEnabled = c.joinReview?.qqLevel?.enabled ?? g.joinReview?.qqLevel?.enabled
   form.minLevel = c.joinReview?.qqLevel?.minLevel ?? g.joinReview?.qqLevel?.minLevel ?? 8
-  form.levelRejectReason = c.joinReview?.qqLevel?.rejectReason ?? g.joinReview?.qqLevel?.rejectReason ?? ''
+  form.levelRejectReason = c.joinReview?.qqLevel?.rejectReason ?? g.joinReview?.qqLevel?.rejectReason ?? dj?.qqLevel?.rejectReason ?? ''
   form.kwEnabled = c.joinReview?.keyword?.enabled ?? g.joinReview?.keyword?.enabled
   form.passKeywords = (c.joinReview?.keyword?.passKeywords ?? g.joinReview?.keyword?.passKeywords ?? []).join(',')
   form.rejectKeywords = (c.joinReview?.keyword?.rejectKeywords ?? g.joinReview?.keyword?.rejectKeywords ?? []).join(',')
-  form.kwRejectReason = c.joinReview?.keyword?.rejectReason ?? g.joinReview?.keyword?.rejectReason ?? ''
+  form.kwRejectReason = c.joinReview?.keyword?.rejectReason ?? g.joinReview?.keyword?.rejectReason ?? dj?.keyword?.rejectReason ?? ''
   form.manualEnabled = c.joinReview?.manual?.enabled ?? g.joinReview?.manual?.enabled
   form.manualTimeout = c.joinReview?.manual?.timeoutMinutes ?? g.joinReview?.manual?.timeoutMinutes ?? 30
-  form.manualRejectReason = c.joinReview?.manual?.rejectReason ?? g.joinReview?.manual?.rejectReason ?? ''
+  form.manualRejectReason = c.joinReview?.manual?.rejectReason ?? g.joinReview?.manual?.rejectReason ?? dj?.manual?.rejectReason ?? ''
   form.llmEnabled = c.joinReview?.llm?.enabled ?? g.joinReview?.llm?.enabled
-  form.llmRejectReason = c.joinReview?.llm?.rejectReason ?? g.joinReview?.llm?.rejectReason ?? ''
+  form.llmRejectReason = c.joinReview?.llm?.rejectReason ?? g.joinReview?.llm?.rejectReason ?? dj?.llm?.rejectReason ?? ''
   form.defaultAction = c.joinReview?.default?.action ?? g.joinReview?.default?.action ?? 'reject'
-  form.defaultRejectReason = c.joinReview?.default?.rejectReason ?? g.joinReview?.default?.rejectReason ?? ''
+  form.defaultRejectReason = c.joinReview?.default?.rejectReason ?? g.joinReview?.default?.rejectReason ?? dj?.default?.rejectReason ?? ''
   // 违禁词 / 禁发链接 / 禁发图片：三块各自有「继承全局」开关。
   // 判断依据是「本群是否真的写过这些字段」——只有本群显式存过才算自定义。
   const cbw = c.bannedWords
@@ -594,15 +629,17 @@ function fillFrom(cfg: any, g: any) {
   form.imgSamples = [...(data.value?.groupImageSamples || [])]
 
   // 三块各自的通知模板（未自定义时从全局回填展示，勾回继承即不写入）
-  form.bwRecallNotice = loadNotice(cbw?.recallNotice, g.bannedWords?.recallNotice)
-  form.bwBanNotice = loadNotice(cbw?.banNotice, g.bannedWords?.banNotice)
-  form.bwKickNotice = loadNotice(cbw?.kickNotice, g.bannedWords?.kickNotice)
-  form.linkRecallNotice = loadNotice(cl?.recallNotice, gl.recallNotice)
-  form.linkBanNotice = loadNotice(cl?.banNotice, gl.banNotice)
-  form.linkKickNotice = loadNotice(cl?.kickNotice, gl.kickNotice)
-  form.imgRecallNotice = loadNotice(ci?.recallNotice, gi.recallNotice)
-  form.imgBanNotice = loadNotice(ci?.banNotice, gi.banNotice)
-  form.imgKickNotice = loadNotice(ci?.kickNotice, gi.kickNotice)
+  // 第三参数为内置默认值：全局也从未配置过时用它兜底，避免输入框空白。
+  const dbw = builtinDefaults.value?.bannedWords || {}
+  form.bwRecallNotice = loadNotice(cbw?.recallNotice, g.bannedWords?.recallNotice, dbw.recallNotice)
+  form.bwBanNotice = loadNotice(cbw?.banNotice, g.bannedWords?.banNotice, dbw.banNotice)
+  form.bwKickNotice = loadNotice(cbw?.kickNotice, g.bannedWords?.kickNotice, dbw.kickNotice)
+  form.linkRecallNotice = loadNotice(cl?.recallNotice, gl.recallNotice, dbw.link?.recallNotice)
+  form.linkBanNotice = loadNotice(cl?.banNotice, gl.banNotice, dbw.link?.banNotice)
+  form.linkKickNotice = loadNotice(cl?.kickNotice, gl.kickNotice, dbw.link?.kickNotice)
+  form.imgRecallNotice = loadNotice(ci?.recallNotice, gi.recallNotice, dbw.image?.recallNotice)
+  form.imgBanNotice = loadNotice(ci?.banNotice, gi.banNotice, dbw.image?.banNotice)
+  form.imgKickNotice = loadNotice(ci?.kickNotice, gi.kickNotice, dbw.image?.kickNotice)
   form.applyGlobalBlacklist = c.applyGlobalBlacklist !== undefined ? c.applyGlobalBlacklist === true : g.applyGlobalBlacklist === true
   form.applyGlobalWhitelist = c.applyGlobalWhitelist !== undefined ? c.applyGlobalWhitelist === true : g.applyGlobalWhitelist === true
   form.essenceEnabled = c.essence?.enabled ?? g.essence?.enabled
@@ -642,6 +679,11 @@ function fillFrom(cfg: any, g: any) {
   form.mcGroupAction = mc?.groupLevel?.action ?? 'none'
   form.mcGroupMuteDuration = mc?.groupLevel?.muteDuration ?? 10
   form.mcGroupWhenUnknown = mc?.groupLevel?.whenUnknown ?? 'skip'
+  form.mcBlEnabled = mc?.blacklist?.enabled ?? false
+  form.mcBlListType = mc?.blacklist?.listType ?? 'blacklist'
+  form.mcBlAddToBlacklist = mc?.blacklist?.addToBlacklist ?? false
+  form.mcBlAction = mc?.blacklist?.action ?? 'none'
+  form.mcBlMuteDuration = mc?.blacklist?.muteDuration ?? 10
   // 调度参数同样是群级配置。默认值必须与 constants.ts 中的 DEFAULT_CONFIG 完全一致，
   // 否则读不到值时表单会显示成另一种默认值，一保存就把该群的调度参数改写掉。
   form.mcIntervalMinutes = mc?.intervalMinutes ?? 30
@@ -652,11 +694,12 @@ function fillFrom(cfg: any, g: any) {
   form.mcCooldownHours = mc?.cooldownHours ?? 24
   form.mcActiveWithinDays = mc?.activeWithinDays ?? 0
 
-  form.mcQqNotice = loadNotice(mc?.qqLevel?.notice)
-  form.mcCardNotice = loadNotice(mc?.card?.notice)
-  form.mcGroupNotice = loadNotice(mc?.groupLevel?.notice)
-  form.autoNotice = loadNotice(c.joinReview?.autoNotice, g.joinReview?.autoNotice)
-  form.abNotice = loadNotice(c.autoBlacklist?.notice, g.autoBlacklist?.notice)
+  form.mcQqNotice = loadNotice(mc?.qqLevel?.notice, null, builtinDefaults.value?.memberCheck?.qqLevel?.notice)
+  form.mcCardNotice = loadNotice(mc?.card?.notice, null, builtinDefaults.value?.memberCheck?.card?.notice)
+  form.mcGroupNotice = loadNotice(mc?.groupLevel?.notice, null, builtinDefaults.value?.memberCheck?.groupLevel?.notice)
+  form.mcBlNotice = loadNotice(mc?.blacklist?.notice, null, builtinDefaults.value?.memberCheck?.blacklist?.notice)
+  form.autoNotice = loadNotice(c.joinReview?.autoNotice, g.joinReview?.autoNotice, builtinDefaults.value?.joinReview?.autoNotice)
+  form.abNotice = loadNotice(c.autoBlacklist?.notice, g.autoBlacklist?.notice, builtinDefaults.value?.autoBlacklist?.notice)
 
   // 群级 AI 覆盖
   const a = c.ai
@@ -791,6 +834,11 @@ async function save() {
         minLevel: Number(form.mcGroupMinLevel),
         whenUnknown: form.mcGroupWhenUnknown,
         notice: noticePatch(form.mcGroupNotice),
+      }),
+      blacklist: mcRule(form.mcBlEnabled, form.mcBlAction, form.mcBlMuteDuration, {
+        listType: form.mcBlListType === 'whitelist' ? 'whitelist' : 'blacklist',
+        addToBlacklist: !!form.mcBlAddToBlacklist,
+        notice: noticePatch(form.mcBlNotice),
       }),
     },
     report: { enabled: form.reportEnabled, levels, frequency: { enabled: form.reportFreqEnabled, windowMinutes: Number(form.reportFreqWindow), maxCount: Number(form.reportFreqMax) } },

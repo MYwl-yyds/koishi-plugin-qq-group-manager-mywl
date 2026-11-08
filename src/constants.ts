@@ -23,7 +23,6 @@ export const DEFAULT_REPORT_PROMPT = `你是一个 QQ 群消息的违规审核�
 export const DEFAULT_CONFIG: Config = {
   enableGroupManagement: true,
   superUsers: [],
-  onebotFramework: 'auto',
   // 「应用全局黑/白名单」各群默认关闭：群聊未显式配置时使用本群独立名单
   applyGlobalBlacklist: false,
   applyGlobalWhitelist: false,
@@ -217,6 +216,21 @@ export const DEFAULT_CONFIG: Config = {
         mode: 'group',
         targetId: '',
         text: '【群员检查·群等级】\n群号：{groupId}\n用户：{nickname}({userId})\n群等级：{level}（要求 ≥ {threshold}）\n处理：{punish}',
+      },
+    },
+    // 黑名单检测：命中黑名单即按规则处理（默认仅记录，需显式改成禁言/踢出）
+    blacklist: {
+      enabled: false,
+      listType: 'blacklist',
+      addToBlacklist: false,
+      action: 'none',
+      muteDuration: 10,
+      recall: false,
+      notice: {
+        enabled: false,
+        mode: 'group',
+        targetId: '',
+        text: '【群员检查·黑名单】\n群号：{groupId}\n用户：{nickname}({userId})\n命中：{word}\n处理：{punish}',
       },
     },
   },

@@ -2,6 +2,7 @@ import { Context } from 'koishi'
 import { resolve } from 'path'
 import { DataService } from '@koishijs/plugin-console'
 import { Services, Config } from '../types'
+import { DEFAULT_CONFIG } from '../constants'
 import { ALL_COMMANDS, PERM_ITEMS } from '../services/permission'
 import { parseLink, isWhitelisted } from '../services/link'
 import { LOG_TYPES } from '../types'
@@ -92,18 +93,19 @@ async function buildOverview(svc: Services, days = 7) {
     // 群员检查：纯群级配置，这里统计「实际启用了检查的群数」与各检测项启用的群数
     memberCheck: await (async () => {
       const records = await svc.store.groupConfigAll()
-      const kinds = { qqLevel: 0, card: 0, groupLevel: 0 }
+      const kinds = { qqLevel: 0, card: 0, groupLevel: 0, blacklist: 0 }
       let enabledGroups = 0
       for (const rec of records) {
         const cfg = await svc.settings.getGroup(String(rec.groupId))
         const mc = cfg.memberCheck
         if (!mc?.enabled) continue
-        const on = !!(mc.qqLevel?.enabled || mc.card?.enabled || mc.groupLevel?.enabled)
+        const on = !!(mc.qqLevel?.enabled || mc.card?.enabled || mc.groupLevel?.enabled || mc.blacklist?.enabled)
         if (!on) continue
         enabledGroups++
         if (mc.qqLevel?.enabled) kinds.qqLevel++
         if (mc.card?.enabled) kinds.card++
         if (mc.groupLevel?.enabled) kinds.groupLevel++
+        if (mc.blacklist?.enabled) kinds.blacklist++
       }
       return {
         enabled: enabledGroups > 0,
@@ -323,7 +325,6 @@ async function buildSettings(svc: Services) {
   return {
     updatedAt: Date.now(),
     global,
-    onebotFramework: svc.config?.onebotFramework ?? 'auto',
     bots: svc.ctx.bots.map((b: any) => ({
       selfId: String(b.selfId ?? b.userId ?? ''),
       platform: b.platform,
@@ -356,6 +357,10 @@ async function buildGroupDetail(svc: Services, groupId: string) {
     global,
     config: record?.config ?? {},
     exists: !!record,
+    // 内置默认值：供前端在没有群级/全局取值时回填表单。
+    // 群员检查是纯群级配置（没有全局回退），若只回填 config，未配置过的群
+    // 那 4 个通知模板输入框会是空的 —— 用户看到的就是「输入框没有默认内容」。
+    defaults: DEFAULT_CONFIG,
     // 该群的专属违规图样本（全局样本在 settings 域中，此处只返回本群自己的）
     groupImageSamples: groupSamples,
   }

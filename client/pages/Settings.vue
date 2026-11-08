@@ -23,12 +23,13 @@
         <div class="qg-grid two">
           <div>
             <div class="qg-row static">
-              <span class="qg-row-label">OneBot 框架</span>
-              <span class="qg-tag neutral">{{ frameworkName }}</span>
+              <span class="qg-row-label">接口调用方式</span>
+              <span class="qg-tag ok">标准 OneBot v11</span>
             </div>
             <p class="qg-hint tight">
-              当前由插件 Schema 配置项决定，实际调用时优先使用协议端提供的底层 <code>_request</code> 透传标准 action，
-              因此 LLBot / NapCat / go-cqhttp 均可直接使用。如需修改请到 Koishi 的插件配置面板。
+              所有接口统一按标准 OneBot v11（<code>snake_case</code> action + 对象参数）调用，
+              优先通过协议端提供的底层 <code>_request</code> 透传，因此 LLBot / NapCat / go-cqhttp
+              均可直接使用，无需任何额外设置。
             </p>
           </div>
           <div>
@@ -66,8 +67,8 @@
           <textarea class="qg-textarea" rows="4" v-model="form.rfText"></textarea>
         </label>
         <p class="qg-hint">
-          变量：{title}=申请类型标题、{userId}=申请人QQ、{nickname}=申请人昵称、{groupId}=群号（好友申请为空）、{comment}=申请内容/附言。
-          目标不能是已在「群聊列表」中配置的群聊。
+          变量：{title}=申请类型标题、{userId}=申请人QQ、{nickname}=申请人昵称、{groupId}=群号（好友申请为空）、{comment}=申请内容/附言、
+          {avatar}=申请人QQ头像图片、{groupAvatar}=群头像图片、{groupName}=群名称、{groupIntro}=群简介、{memberCount}=群人数。
         </p>
         <div class="qg-actions"><button class="qg-btn primary" @click="saveGlobal">保存通知转发</button></div>
       </Section>
@@ -125,7 +126,6 @@ import TagList from '../components/TagList.vue'
 
 const superUsers = ref<string[]>([])
 const superInput = ref('')
-const framework = ref('auto')
 const testing = ref(false)
 const form = reactive<any>({ rfEnabled: false, rfMode: 'group', rfTargetId: '', rfText: '' })
 const aiForm = reactive<any>({ enabled: false, baseURL: '', apiKey: '', model: '', temperature: 0.3, maxTokens: 1024, timeout: 30000 })
@@ -157,7 +157,6 @@ watch(data, (d) => {
   aiForm.temperature = g.ai?.temperature ?? 0.3
   aiForm.maxTokens = g.ai?.maxTokens ?? 1024
   aiForm.timeout = g.ai?.timeout ?? 30000
-  framework.value = d.onebotFramework || 'auto'
 }, { immediate: true })
 
 function addSuper() {
@@ -234,11 +233,7 @@ async function testAi() {
   else toast.error(res?.error || '连接失败')
 }
 
-// 框架选择实际由插件 Schema 控制，此处只做只读展示
-const frameworkName = computed(() => {
-  const map: Record<string, string> = { auto: '自动检测', napcat: 'NapCat', llbot: 'LLBot' }
-  return map[framework.value] || framework.value || '自动检测'
-})
+// 框架选择已随 onebotFramework 配置项一并移除（该值从未参与任何分支判断）。
 </script>
 
 <style scoped>

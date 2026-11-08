@@ -1,11 +1,20 @@
 import { Context, Session } from 'koishi'
 import { Services, JoinRequestRecord, Config } from '../types'
-import { idOf, TimerRegistry } from '../utils'
-import { trackRequest, lookupRequest, quotedMessageId } from '../services/request-tracker'
+import { idOf, TimerRegistry, plainText } from '../utils'
+import { trackRequest, lookupRequest, quotedMessageId, resolveRequestFallback } from '../services/request-tracker'
 
+// 取 OneBot 请求事件里的 flag（调用 set_group_add_request / set_friend_add_request 必须用它）。
+// 注意顺序：session.id 是 Koishi 内部事件 ID，不是 flag，只能作为最后兜底；
+// 真实 flag 优先从 session.flag 或原始事件负载里取，否则审批调用会因 flag 无效而失败。
 function requestFlag(session: Session): string {
   const s = session as any
-  return String(s.messageId ?? s.flag ?? s.id ?? '')
+  const ev = s.event || {}
+  const raw = ev._data || ev.data || {}
+  return String(
+    s.flag ?? ev.flag ?? raw.flag
+    ?? s.messageId ?? ev.messageId ?? raw.message_id
+    ?? s.id ?? '',
+  )
 }
 
 function requestSubType(session: Session): string {
@@ -13,16 +22,24 @@ function requestSubType(session: Session): string {
 }
 
 // 解析引用文本中的审核意图
+// 允许词后跟标点（「同意！」「y，理由」）。
+// 注意：不能用 \b —— \w 只含 [A-Za-z0-9_]，中文不是单词字符，
+// 「同意」后面无论接空格还是中文都构不成 \b 边界，那条正则永远不成立。
+// 因此统一用「词后紧跟标点/空白/结尾」的前瞻来判断，避免「同意啊」被误判。
 function parseReplyIntent(text: string): 'approve' | 'reject' | null {
   const t = String(text || '').trim()
-  if (/^(同意|通过|y|yes)(\s|$)/i.test(t)) return 'approve'
-  if (/^(拒绝|不通过|n|no)(\s|$)/i.test(t)) return 'reject'
+  if (!t) return null
+  if (/^(同意|通过|批准|y|yes)(?=[\s，,。.!！~～、:：]|$)/i.test(t)) return 'approve'
+  if (/^(拒绝|不通过|驳回|n|no)(?=[\s，,。.!！~～、:：]|$)/i.test(t)) return 'reject'
   return null
 }
 
 // 去掉意图词，返回理由（未填写则为空）
 function stripIntent(text: string): string {
-  return String(text || '').replace(/^(拒绝|不通过|no|n|同意|通过|yes|y)(\s+|$)/i, '').trim()
+  return String(text || '')
+    .replace(/^(拒绝|不通过|驳回|no|n|同意|通过|批准|yes|y)(?=[\s，,。.!！~～、:：]|$)/i, '')
+    .replace(/^[\s，,。.!！~～、:：]+/, '')
+    .trim()
 }
 
 // 通知审核员（拥有「审核员」权限的用户可引用回复完成审批）。
@@ -62,7 +79,8 @@ async function handleJoinRequest(svc: Services, session: Session, timers: TimerR
 
   const groupId = idOf(session.guildId)
   const userId = idOf(session.userId)
-  const comment = String(session.content ?? '')
+  // 申请内容用文本段（session.content 会带上段标记）
+  const comment = plainText(session)
   const nickname = await svc.onebot.resolveNickname(session, groupId, userId)
 
   const cfg = await svc.settings.getGroup(groupId)
@@ -215,12 +233,26 @@ export function apply(ctx: Context, svc: Services) {
     try {
       const qid = quotedMessageId(session)
       if (!qid) return next()
-      const meta = lookupRequest(qid, idOf(session.guildId))
-      if (!meta || meta.source !== 'manual') return next()
-      const intent = parseReplyIntent(String(session.content ?? '').trim())
+      // 关键：必须用文本段而不是 session.content —— 引用回复时 content 形如
+      // 「[quote:id=123] 同意」，意图正则匹配不到开头，导致审批永远无法生效。
+      const text = plainText(session).trim()
+      const intent = parseReplyIntent(text)
       if (!intent) return next()
 
-      const record = await svc.store.joinRequestByFlag(meta.flag)
+      const gid = idOf(session.guildId)
+      let flag = ''
+      const meta = lookupRequest(qid, gid)
+      if (meta && meta.source === 'manual') {
+        flag = meta.flag
+      } else {
+        // 内存未命中（插件重载 / 重启后通知仍在群里）时的兜底：
+        // 该群当前只有一条待审申请就直接处理它，多条时放弃以免审错人。
+        const fb = await resolveRequestFallback(svc.store, gid)
+        if (!fb) return next()
+        flag = fb.flag
+      }
+
+      const record = await svc.store.joinRequestByFlag(flag)
       if (!record || record.status !== 'pending') return next()
 
       const cfg = await svc.settings.getGroup(record.groupId)
@@ -229,15 +261,15 @@ export function apply(ctx: Context, svc: Services) {
 
       const approve = intent === 'approve'
       // 理由可选：未填写时拒绝使用「人工审核」配置的默认拒绝理由
-      let reason = stripIntent(String(session.content ?? '').trim())
+      let reason = stripIntent(text)
       if (!approve && !reason) reason = cfg.joinReview.manual.rejectReason || ''
       const uid = idOf(session.userId)
       try {
-        await svc.onebot.handleJoinRequest(session, meta.flag, record.subType || 'add', approve, reason)
+        await svc.onebot.handleJoinRequest(session, flag, record.subType || 'add', approve, reason)
       } catch (e) {
         return `操作失败：${(e as Error).message}`
       }
-      await svc.store.joinRequestUpdate(meta.flag, { status: approve ? 'approved' : 'rejected' })
+      await svc.store.joinRequestUpdate(flag, { status: approve ? 'approved' : 'rejected' })
       await svc.log.audit(approve ? '入群审核通过' : '入群审核拒绝', { operatorId: uid, operatorName: (session as any).username || '', targetId: record.userId, groupId: record.groupId, detail: reason })
       return approve ? '已同意该入群申请' : `已拒绝该入群申请${reason ? `（${reason}）` : ''}`
     } catch (e) {

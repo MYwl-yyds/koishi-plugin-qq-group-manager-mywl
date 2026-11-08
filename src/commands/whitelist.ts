@@ -6,6 +6,11 @@ function guild(session: Session): string {
   return idOf(session.guildId)
 }
 
+// 统一的名单渲染：避免两处格式不一致
+function formatEntries(list: any[]): string {
+  return list.map((e, i) => `${i + 1}. ${e.userId}${e.groupId ? `（群 ${e.groupId}）` : '（全局）'}`).join('\n')
+}
+
 // 白名单管理
 export function apply(ctx: Context, svc: Services) {
   ctx.command('添加白名单 <user:string>', '将指定用户加入白名单（加 -q 加入全局白名单）')
@@ -52,12 +57,27 @@ export function apply(ctx: Context, svc: Services) {
     .option('global', '-q 仅查看全局白名单')
     .action(async ({ session, options }: any) => {
       if (!await svc.permission.check(session, '白名单查看')) return '你没有权限使用此命令'
-      const list = await svc.store.whitelistList()
-      const scoped = options?.global
-        ? list.filter((e) => !e.groupId)
-        : list.filter((e) => !e.groupId || e.groupId === guild(session))
-      if (scoped.length === 0) return '白名单为空'
-      const lines = scoped.map((e, i) => `${i + 1}. ${e.userId}${e.groupId ? `（群 ${e.groupId}）` : '（全局）'}`)
-      return `白名单（共 ${scoped.length} 人）：\n${lines.join('\n')}`
+      // 修复同「黑名单列表」：按范围分别查询，并兼容 channelId 与私聊场景
+      const gid = idOf(session.guildId ?? (session as any).channelId)
+      const globalList = await svc.store.whitelistList('')
+      if (options?.global) {
+        if (globalList.length === 0) return '全局白名单为空'
+        return `全局白名单（共 ${globalList.length} 人）：\n${formatEntries(globalList)}`
+      }
+      const groupList = gid ? await svc.store.whitelistList(gid) : []
+      const scoped = [...groupList, ...globalList]
+      if (scoped.length > 0) {
+        const head = gid ? `群 ${gid} 白名单（含全局）` : '白名单'
+        return `${head}（共 ${scoped.length} 人）：\n${formatEntries(scoped)}`
+      }
+      // 本群与全局都为空：若数据存在其它群名下，明确指出，避免被误判成「功能坏了」
+      const all = await svc.store.whitelistList()
+      const others = all.filter((e: any) => e.groupId && e.groupId !== gid)
+      if (others.length > 0) {
+        const gids = Array.from(new Set(others.map((e: any) => String(e.groupId))))
+        return `群 ${gid || '(未知)'} 与全局白名单均为空。\n其它群存在 ${others.length} 条记录：${gids.join('、')}\n`
+          + '如需查看请到对应群内执行，或到 WebUI「名单中心 → 白名单」查看。'
+      }
+      return gid ? `群 ${gid} 的白名单为空（全局白名单也为空）` : '当前不在群聊中，且全局白名单为空'
     })
 }

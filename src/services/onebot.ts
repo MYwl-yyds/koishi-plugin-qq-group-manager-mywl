@@ -1,5 +1,5 @@
 import { Context, Session } from 'koishi'
-import { OneBotFramework, OneBotMemberInfo } from '../types'
+import { OneBotMemberInfo } from '../types'
 import { idOf, mapConcurrent, sleep } from '../utils'
 import { ImageGuardService } from './image-guard'
 
@@ -39,7 +39,6 @@ export interface MemberInfo {
 export class OneBotService {
   private ctx: Context
   private log: any
-  readonly framework: OneBotFramework
   // 群资料短时缓存，避免违禁词等高频通知重复调用 get_group_info
   private groupProfileCache = new Map<string, { at: number, data: GroupProfile }>()
   // 群成员列表短时缓存，避免群员检查与权限导入等重复拉取
@@ -47,10 +46,9 @@ export class OneBotService {
   // 陌生人信息（QQ 等级）短时缓存
   private strangerCache = new Map<string, { at: number, data: { nickname?: string, level?: number } | null }>()
 
-  constructor(ctx: Context, framework: OneBotFramework = 'auto') {
+  constructor(ctx: Context) {
     this.ctx = ctx
     this.log = ctx.logger('onebot')
-    this.framework = framework
   }
 
   // 取出底层原始请求对象：
@@ -608,11 +606,34 @@ export class OneBotService {
     return data
   }
 
+  // 归一化 sendMessage 的返回值：不同适配器可能返回 string / string[] /
+  // { message_id } / { messageId } / [{ id }]，统一取第一个可用的消息 ID。
+  // 这一步很关键：引用回复审批依赖该 ID 反查申请，取错就等于审批永远失效。
+  private pickMessageId(res: any): string {
+    const pick = (v: any): string => {
+      if (v === null || v === undefined) return ''
+      if (typeof v === 'string') return v
+      if (typeof v === 'number') return String(v)
+      if (typeof v === 'object') {
+        const id = v.message_id ?? v.messageId ?? v.id ?? v.msg_id ?? v.msgId
+        if (id !== undefined && id !== null) return String(id)
+      }
+      return ''
+    }
+    if (Array.isArray(res)) {
+      for (const item of res) {
+        const id = pick(item)
+        if (id) return id
+      }
+      return ''
+    }
+    return pick(res)
+  }
+
   async sendGroup(session: Session, groupId: string, content: string | any[]): Promise<string> {
     try {
       const res = await session.bot.sendMessage(groupId, content as any, groupId)
-      const ids = Array.isArray(res) ? res : [res]
-      return String(ids[0] ?? '')
+      return this.pickMessageId(res)
     } catch (e) {
       this.log.warn('发送群消息失败', normalizeError(e).message)
       return ''
@@ -622,8 +643,7 @@ export class OneBotService {
   async sendPrivate(session: Session, userId: string, content: string | any[]): Promise<string> {
     try {
       const res = await session.bot.sendPrivateMessage(userId, content as any)
-      const ids = Array.isArray(res) ? res : [res]
-      return String(ids[0] ?? '')
+      return this.pickMessageId(res)
     } catch (e) {
       this.log.warn('发送私聊消息失败', normalizeError(e).message)
       return ''
